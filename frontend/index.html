@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CBCSpace · chemical space explorer</title>
+  <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+  <style>
+    :root {
+      --bg:#F4F6FB; --panel:#FFFFFF; --soft:#EDF1F8; --line:#DCE2EE; --line2:#C2CADB;
+      --ink:#161B29; --ink2:#5A6480; --ink3:#9AA2B8; --acc:#3B5BFF; --acc2:#13B7A6;
+      --accbg:#E7ECFF; --warn:#E0483B; --pw:280px;
+    }
+    .dark {
+      --bg:#0C0E15; --panel:#11141D; --soft:#171B27; --line:#222838; --line2:#323a52;
+      --ink:#D6DDEC; --ink2:#8B93A8; --ink3:#4A5570; --acc:#5B8CFF; --acc2:#3FD6C0;
+      --accbg:#1A2240; --warn:#FF6B5E;
+    }
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html,body{height:100%;overflow:hidden;font-family:'Inter',Arial,sans-serif;font-size:13px}
+    body{background:var(--bg);color:var(--ink);display:flex;flex-direction:column;transition:.2s}
+    #hdr{height:50px;background:var(--panel);border-bottom:1px solid var(--line);display:flex;
+      align-items:center;gap:1rem;padding:0 1.1rem;flex-shrink:0;z-index:10}
+    .brand{font-weight:800;letter-spacing:.06em;color:var(--acc);font-size:.92rem}
+    .brand b{color:var(--acc2)}
+    .ver{font-size:.7rem;color:var(--ink3)}
+    .grow{flex:1}
+    #status{font-size:.76rem;color:var(--ink3)}
+    .btn{font-size:.74rem;padding:.4rem .8rem;border-radius:6px;cursor:pointer;border:1px solid var(--line2);
+      background:var(--soft);color:var(--ink2);transition:.15s;white-space:nowrap}
+    .btn:hover{border-color:var(--acc);color:var(--acc)}
+    #app{display:flex;flex:1;overflow:hidden}
+    .panel{width:var(--pw);flex-shrink:0;background:var(--panel);display:flex;flex-direction:column;overflow:hidden}
+    #left{border-right:1px solid var(--line)}
+    #right{width:230px;border-left:1px solid var(--line)}
+    .scroll{flex:1;overflow-y:auto;padding:.85rem}
+    .scroll::-webkit-scrollbar{width:7px}
+    .scroll::-webkit-scrollbar-thumb{background:var(--line2);border-radius:4px}
+    .lbl{font-size:.66rem;font-weight:800;letter-spacing:.12em;color:var(--ink3);text-transform:uppercase;
+      margin:.9rem 0 .45rem;display:flex;align-items:center;gap:.45rem}
+    .lbl::after{content:'';flex:1;height:1px;background:var(--line)}
+    .sub{font-size:.64rem;font-weight:700;letter-spacing:.08em;color:var(--ink3);text-transform:uppercase;margin:.55rem 0 .25rem .15rem}
+    #drop{border:1.5px dashed var(--line2);border-radius:8px;padding:1.15rem .5rem;text-align:center;
+      cursor:pointer;transition:.15s;color:var(--ink3);font-size:.78rem}
+    #drop:hover,#drop.over{border-color:var(--acc);color:var(--acc);background:var(--accbg)}
+    #drop .ic{font-size:1.5rem;margin-bottom:.25rem}
+    #file{display:none}
+    .row{display:flex;align-items:center;gap:.45rem;padding:.34rem .3rem;border-radius:5px}
+    .row:hover{background:var(--soft)}
+    .row input[type=checkbox]{width:13px;height:13px;accent-color:var(--acc);flex-shrink:0}
+    .swatch{position:relative;width:15px;height:15px;flex-shrink:0}
+    .swatch .dot{width:15px;height:15px;border-radius:50%;border:2px solid var(--line2);pointer-events:none}
+    .swatch select{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+    .nm{flex:1;font-size:.78rem;color:var(--ink2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .ct{font-size:.68rem;color:var(--ink3);flex-shrink:0;font-variant-numeric:tabular-nums}
+    .rm{background:none;border:none;color:var(--ink3);cursor:pointer;font-size:.8rem;padding:0 .2rem}
+    .rm:hover{color:var(--warn)}
+    .seg{display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.5rem}
+    .seg .opt{font-size:.74rem;padding:.28rem .65rem;border-radius:5px;border:1px solid var(--line2);
+      background:var(--soft);color:var(--ink2);cursor:pointer;transition:.15s}
+    .seg .opt.on{background:var(--accbg);border-color:var(--acc);color:var(--acc);font-weight:700}
+    #axes{display:none;margin-top:.35rem}
+    #axes.show{display:block}
+    .arow{display:flex;align-items:center;gap:.45rem;margin-bottom:.35rem}
+    .arow span{font-size:.72rem;color:var(--ink3);width:12px}
+    select{flex:1;font-size:.73rem;padding:.28rem .4rem;border-radius:5px;border:1px solid var(--line2);
+      background:var(--soft);color:var(--ink2)}
+    select:focus{outline:none;border-color:var(--acc)}
+    .dgrid{display:flex;flex-direction:column;gap:.1rem;max-height:230px;overflow-y:auto}
+    .dgrid::-webkit-scrollbar{width:7px}
+    .dgrid::-webkit-scrollbar-thumb{background:var(--line2);border-radius:4px}
+    .drow{display:flex;align-items:center;gap:.45rem;padding:.14rem .2rem;border-radius:4px}
+    .drow:hover{background:var(--soft)}
+    .drow input{width:12px;height:12px;accent-color:var(--acc)}
+    .drow label{font-size:.73rem;color:var(--ink2);cursor:pointer}
+    .drow label i{color:var(--ink3);font-style:normal}
+    .mini{display:flex;gap:.4rem;margin-bottom:.4rem}
+    .mini .btn{flex:1;padding:.3rem;text-align:center}
+    .slider{display:flex;align-items:center;gap:.5rem}
+    input[type=range]{flex:1;accent-color:var(--acc)}
+    .sval{font-size:.72rem;color:var(--ink3);min-width:30px;text-align:right}
+    #go{width:100%;margin-top:.9rem;padding:.65rem;font-size:.8rem;font-weight:800;letter-spacing:.04em;
+      background:var(--acc);border:none;color:#fff;border-radius:7px;cursor:pointer;transition:.15s}
+    #go:hover{filter:brightness(1.08)}
+    #go:disabled{opacity:.45;cursor:not-allowed}
+    #plotwrap{flex:1;display:flex;flex-direction:column;background:var(--bg);position:relative;overflow:hidden}
+    #plot{width:100%;flex:1}
+    #plotinfo{position:absolute;top:8px;right:14px;font-size:.7rem;color:var(--ink3);
+      background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:.2rem .5rem;display:none}
+    #resetbtn{position:absolute;top:8px;left:14px;font-size:.72rem;color:var(--ink2);cursor:pointer;
+      background:var(--panel);border:1px solid var(--line2);border-radius:5px;padding:.28rem .6rem;display:none;z-index:21;transition:.15s}
+    #resetbtn:hover{border-color:var(--acc);color:var(--acc)}
+    #empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+      flex-direction:column;gap:.4rem;pointer-events:none;color:var(--ink3)}
+    #empty.hide{display:none}
+    #empty .p{font-size:.8rem}
+    #empty .p::before{content:'▸ ';color:var(--acc2)}
+    #card{position:absolute;pointer-events:none;background:var(--panel);border:1px solid var(--line2);
+      border-radius:10px;overflow:hidden;box-shadow:0 6px 28px rgba(0,0,0,.18);display:none;z-index:20;min-width:200px}
+    #card .cd{font-size:.72rem;font-weight:800;color:var(--acc);padding:.45rem .7rem .15rem;letter-spacing:.03em}
+    #card img{display:block;width:220px;height:180px;object-fit:contain;background:#fff}
+    #card .cn{font-size:.74rem;color:var(--ink2);padding:.2rem .7rem .45rem;text-align:center;word-break:break-all}
+    #prog{position:absolute;inset:0;background:rgba(244,246,251,.86);display:none;align-items:center;
+      justify-content:center;flex-direction:column;gap:.75rem;z-index:30}
+    .dark #prog{background:rgba(12,14,21,.86)}
+    #prog.show{display:flex}
+    #progmsg{font-size:.85rem;color:var(--ink2)}
+    .pbar{width:240px;height:4px;background:var(--line);border-radius:2px;overflow:hidden}
+    .pbar i{display:block;height:100%;background:var(--acc);width:0;transition:width .3s}
+    table{width:100%;border-collapse:collapse;font-size:.72rem}
+    th{color:var(--ink3);font-weight:800;padding:.3rem .4rem;text-align:left;border-bottom:1px solid var(--line);
+      font-size:.66rem;letter-spacing:.06em}
+    td{padding:.3rem .4rem;color:var(--ink2);border-bottom:1px solid var(--line)}
+    td.v{color:var(--ink);font-weight:700;text-align:right;font-variant-numeric:tabular-nums}
+    #notif{position:fixed;bottom:1rem;left:50%;transform:translateX(-50%);background:var(--panel);
+      border:1px solid var(--line2);border-radius:7px;padding:.6rem 1.2rem;font-size:.8rem;color:var(--ink2);
+      box-shadow:0 4px 18px rgba(0,0,0,.14);opacity:0;transition:.3s;pointer-events:none;z-index:99}
+    #notif.show{opacity:1}
+    #notif.err{border-color:var(--warn);color:var(--warn)}
+  </style>
+</head>
+<body>
+<div id="hdr">
+  <span class="brand">CBC<b>Space</b></span>
+  <span class="ver">chemical space explorer · python</span>
+  <div class="grow"></div>
+  <span id="status">connecting…</span>
+  <button class="btn" id="themebtn" onclick="toggleTheme()">☾ dark</button>
+</div>
+
+<div id="app">
+  <div class="panel" id="left"><div class="scroll">
+    <div class="lbl">datasets</div>
+    <div id="drop" onclick="file.click()" ondragover="dover(event)" ondragleave="dleave(event)" ondrop="ddrop(event)">
+      <div class="ic">⊕</div><div>drop csv / tsv / excel</div>
+    </div>
+    <input type="file" id="file" accept=".csv,.tsv,.xlsx,.xls" onchange="pick(event)">
+    <div class="sub">default libraries</div>
+    <div id="defaults"></div>
+    <div class="sub" id="userlbl" style="display:none">your libraries</div>
+    <div id="userlist"></div>
+
+    <div class="lbl">feature space</div>
+    <div class="seg" id="features">
+      <div class="opt on" onclick="setFeature('descriptors')">descriptors</div>
+      <div class="opt" onclick="setFeature('fingerprint')">fingerprint</div>
+    </div>
+    <div class="sub" id="fp-note" style="display:none;text-transform:none;letter-spacing:0">ECFP4 · Morgan r2 · 2048-bit · Tanimoto</div>
+
+    <div class="lbl">projection</div>
+    <div class="seg" id="methods">
+      <div class="opt on" onclick="setMethod('PCA')">PCA</div>
+      <div class="opt" onclick="setMethod('UMAP')">UMAP</div>
+      <div class="opt" onclick="setMethod('tSNE')">t-SNE</div>
+      <div class="opt" id="opt-custom" onclick="setMethod('Custom')">custom</div>
+    </div>
+    <div class="seg" id="dims">
+      <div class="opt on" onclick="setDim(2)">2D</div>
+      <div class="opt" onclick="setDim(3)">3D</div>
+    </div>
+    <div id="axes">
+      <div class="arow"><span>x</span><select id="ax"></select></div>
+      <div class="arow"><span>y</span><select id="ay"></select></div>
+      <div class="arow" id="azrow" style="display:none"><span>z</span><select id="az"></select></div>
+    </div>
+    <div id="tsne-opt" style="display:none">
+      <div class="drow"><input type="checkbox" id="tsne-pca" checked><label for="tsne-pca">PCA pre-reduce to 50D <i>· faster, euclidean</i></label></div>
+    </div>
+
+    <div id="desc-section">
+      <div class="lbl">descriptors</div>
+      <div class="mini"><button class="btn" onclick="allDesc(1)">all</button><button class="btn" onclick="allDesc(0)">none</button></div>
+      <div class="dgrid" id="descs"></div>
+    </div>
+
+    <div class="lbl">point size</div>
+    <div class="slider">
+      <input type="range" id="size" min="2" max="16" value="6" oninput="sval.textContent=this.value+'px';repaint()">
+      <span class="sval" id="sval">6px</span>
+    </div>
+    <button id="go" onclick="compute()" disabled>▶ compute projection</button>
+  </div></div>
+
+  <div id="plotwrap">
+    <div id="empty"><div class="p">load a dataset and compute a projection</div></div>
+    <div id="plot"></div>
+    <button id="resetbtn" onclick="resetView()" title="center & fit">⤢ reset view</button>
+    <div id="plotinfo"></div>
+    <div id="card"><div class="cd" id="card-d"></div><img id="card-i" src="" alt=""><div class="cn" id="card-n"></div></div>
+    <div id="prog"><div id="progmsg">computing…</div><div class="pbar"><i id="pbar"></i></div></div>
+  </div>
+
+  <div class="panel" id="right"><div class="scroll">
+    <div class="lbl">overlap analysis</div>
+    <button class="btn" style="width:100%;margin-bottom:.5rem" onclick="computeOverlap()">compute overlap</button>
+    <table><thead><tr><th>sets</th><th style="text-align:right">distance</th></tr></thead><tbody id="distbody"></tbody></table>
+    <div class="lbl" style="margin-top:1.1rem">spread</div>
+    <table><thead><tr><th>set</th><th style="text-align:right">spread</th></tr></thead><tbody id="spreadbody"></tbody></table>
+  </div></div>
+</div>
+<div id="notif"></div>
+
+<script>
+const API = '';  // same origin
+let sid=null, datasets={}, defaults=new Set(), method='PCA', nDims=2, feature='descriptors', dark=false, last=null, descLabels={}, ci=0;
+const COLORS=['#3B5BFF','#FF6B6B','#51CF66','#FFD43B','#CC5DE8','#FF922B','#74C0FC','#F06595','#A9E34B','#13B7A6'];
+const COLOR_OPTS=[['#3B5BFF','blue'],['#FF6B6B','coral'],['#51CF66','green'],['#FFD43B','yellow'],['#CC5DE8','purple'],
+  ['#FF922B','orange'],['#74C0FC','sky'],['#F06595','pink'],['#A9E34B','lime'],['#13B7A6','teal'],['#FF4444','red'],['#FFFFFF','white']];
+
+async function init(){
+  try{
+    const r=await fetch(`${API}/session/new`); const d=await r.json();
+    if(!r.ok) throw 0;
+    sid=d.session_id; descLabels=d.descriptor_labels;
+    buildDescs(); buildAxes();
+    Object.entries(d.sets).forEach(([n,info])=>{
+      datasets[n]={count:info.n_molecules,color:COLORS[ci++%COLORS.length],visible:true,isDefault:true}; defaults.add(n);
+    });
+    renderList();
+    const n=Object.keys(d.sets).length;
+    if(n){ go.disabled=false; empty.classList.add('hide'); status.textContent=`${n} default ${n>1?'libraries':'library'} loaded`; }
+    else status.textContent='drop a csv or excel file to begin';
+  }catch(e){ status.textContent='backend unreachable'; notify('cannot reach backend',1); }
+}
+function toggleTheme(){ dark=!dark; document.body.classList.toggle('dark',dark);
+  themebtn.textContent=dark?'☀ light':'☾ dark'; if(last) renderPlot(last); }
+
+// drag/drop + upload
+function dover(e){e.preventDefault();drop.classList.add('over')}
+function dleave(e){drop.classList.remove('over')}
+function ddrop(e){e.preventDefault();drop.classList.remove('over');if(e.dataTransfer.files.length)upload(e.dataTransfer.files[0])}
+function pick(e){if(e.target.files.length)upload(e.target.files[0])}
+async function upload(f){
+  status.textContent=`uploading ${f.name}…`; showProg('uploading & computing descriptors + fingerprints…',25);
+  const fd=new FormData(); fd.append('file',f); if(sid) fd.append('session_id',sid);
+  try{
+    const r=await fetch(`${API}/upload`,{method:'POST',body:fd}); const d=await r.json();
+    if(!r.ok) throw new Error(d.detail||'upload failed');
+    sid=d.session_id;
+    datasets[d.set_name]={count:d.n_molecules,color:COLORS[ci++%COLORS.length],visible:true,isDefault:false};
+    renderList(); go.disabled=false; empty.classList.add('hide');
+    status.textContent=`${d.set_name} · ${d.n_molecules.toLocaleString()} molecules`;
+    notify(`loaded ${d.set_name} (${d.n_molecules.toLocaleString()})`);
+  }catch(e){ notify(e.message,1); status.textContent='upload failed'; }
+  hideProg();
+}
+
+// dataset list
+function swatchHTML(n,c){
+  const o=COLOR_OPTS.map(([hex,nm])=>`<option value="${hex}" ${hex===c?'selected':''}>${nm}</option>`).join('');
+  return `<div class="swatch"><div class="dot" id="dot-${CSS.escape(n)}" style="background:${c}"></div><select onchange="setColor('${n}',this.value)">${o}</select></div>`;
+}
+function rowHTML(n,d){
+  return `<div class="row"><input type="checkbox" ${d.visible?'checked':''} onchange="datasets['${n}'].visible=this.checked">
+    ${swatchHTML(n,d.color)}<span class="nm" title="${n}">${n}</span>
+    <span class="ct">${d.count.toLocaleString()}</span>
+    ${d.isDefault?'':`<button class="rm" onclick="removeSet('${n}')">✕</button>`}</div>`;
+}
+function renderList(){
+  const def=Object.entries(datasets).filter(([,d])=>d.isDefault), usr=Object.entries(datasets).filter(([,d])=>!d.isDefault);
+  defaults_el().innerHTML=def.map(([n,d])=>rowHTML(n,d)).join('');
+  userlbl.style.display=usr.length?'':'none';
+  userlist.innerHTML=usr.map(([n,d])=>rowHTML(n,d)).join('');
+}
+function defaults_el(){return document.getElementById('defaults')}
+function setColor(n,c){ datasets[n].color=c; const dot=document.getElementById('dot-'+CSS.escape(n)); if(dot)dot.style.background=c; if(last)renderPlot(last); }
+async function removeSet(n){
+  if(sid) await fetch(`${API}/session/${sid}/set/${encodeURIComponent(n)}`,{method:'DELETE'});
+  delete datasets[n]; renderList();
+  if(!Object.keys(datasets).length){ go.disabled=true; empty.classList.remove('hide'); Plotly.purge('plot'); last=null; plotinfo.style.display='none'; resetbtn.style.display='none'; }
+}
+
+// controls
+const _norm=s=>s.toLowerCase().replace(/[^a-z0-9]/g,'');
+function setMethod(m){ method=m; [...methods.children].forEach(b=>b.classList.toggle('on',_norm(b.textContent)===_norm(m)));
+  axes.classList.toggle('show',m==='Custom'); updateTsneOpt(); }
+function setFeature(f){ feature=f;
+  [...features.children].forEach(b=>b.classList.toggle('on',_norm(b.textContent)===_norm(f)));
+  const fp=f==='fingerprint';
+  document.getElementById('desc-section').style.display=fp?'none':'';
+  document.getElementById('opt-custom').style.display=fp?'none':'';
+  document.getElementById('fp-note').style.display=fp?'':'none';
+  if(fp && method==='Custom') setMethod('PCA');   // custom axes need named descriptors
+  updateTsneOpt();
+}
+function updateTsneOpt(){ document.getElementById('tsne-opt').style.display=(feature==='fingerprint'&&method==='tSNE')?'':'none'; }
+function setDim(d){ nDims=d; [...dims.children].forEach(b=>b.classList.toggle('on',b.textContent===d+'D')); azrow.style.display=d===3?'flex':'none'; }
+function buildDescs(){ descs.innerHTML=Object.entries(descLabels).map(([k,l])=>`<div class="drow"><input type="checkbox" id="d-${k}" value="${k}" checked><label for="d-${k}">${k} <i>· ${l}</i></label></div>`).join(''); }
+function selDescs(){ return [...descs.querySelectorAll('input:checked')].map(i=>i.value); }
+function allDesc(on){ descs.querySelectorAll('input').forEach(i=>i.checked=!!on); }
+function buildAxes(){ const o=Object.entries(descLabels).map(([k,l])=>`<option value="${k}">${k} · ${l}</option>`).join('');
+  ['ax','ay','az'].forEach(id=>document.getElementById(id).innerHTML=o); ay.selectedIndex=2; az.selectedIndex=3; }
+
+// compute
+async function compute(){
+  const vis=Object.entries(datasets).filter(([,d])=>d.visible).map(([n])=>n);
+  if(!vis.length){ notify('no datasets selected',1); return; }
+  const slow=method==='UMAP'||method==='tSNE';
+  showProg(slow?`running ${method.toLowerCase()} (this may take a moment)…`:`running ${method.toLowerCase()}…`, slow?10:40);
+  try{
+    const r=await fetch(`${API}/project`,{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({session_id:sid,set_names:vis,descriptor_cols:selDescs(),method,n_dimensions:nDims,
+        x_col:ax.value,y_col:ay.value,z_col:az.value,feature,
+        tsne_pca_reduce:document.getElementById('tsne-pca').checked})});
+    const d=await r.json(); if(!r.ok) throw new Error(d.detail||'projection failed');
+    last=d; renderPlot(d);
+    status.textContent=`${method} · ${nDims}D · ${feature==='fingerprint'?'ECFP4 · ':''}${d.n_total.toLocaleString()} molecules`;
+  }catch(e){ notify(e.message,1); status.textContent='projection failed'; }
+  hideProg();
+}
+
+function renderPlot(data){
+  const {coords,labels,names,smiles,method:m,explained_variance:ev,axis_labels,n_total,n_displayed}=data;
+  const bg=dark?'#0C0E15':'#F4F6FB', grid=dark?'#222838':'#DCE2EE', tc=dark?'#8B93A8':'#5A6480';
+  const groups={};
+  labels.forEach((lb,i)=>{ (groups[lb]=groups[lb]||{x:[],y:[],z:[],n:[],s:[],c:datasets[lb]?.color||'#888'});
+    groups[lb].x.push(coords[i][0]); groups[lb].y.push(coords[i][1]); if(nDims===3)groups[lb].z.push(coords[i][2]);
+    groups[lb].n.push(names[i]); groups[lb].s.push(smiles[i]); });
+  const ps=parseInt(size.value);
+  const traces=Object.entries(groups).map(([lb,g])=>{
+    const base={name:lb,mode:'markers',marker:{size:ps,color:g.c,opacity:.8,line:{width:.4,color:'rgba(0,0,0,.25)'}},
+      customdata:g.s.map((s,i)=>[lb,g.n[i],s]),hoverinfo:'none'};
+    return nDims===3?{...base,type:'scatter3d',x:g.x,y:g.y,z:g.z,marker:{...base.marker,line:{width:0}}}
+                    :{...base,type:'scattergl',x:g.x,y:g.y};
+  });
+  let xl,yl,zl;
+  if(axis_labels){ [xl,yl,zl]=axis_labels; }
+  else if(m==='PCA'&&ev){ xl=`PC1 (${ev[0].toFixed(1)}%)`; yl=`PC2 (${ev[1].toFixed(1)}%)`; zl=ev[2]?`PC3 (${ev[2].toFixed(1)}%)`:'PC3'; }
+  else { const pre=m==='tSNE'?'tSNE':'UMAP'; xl=`${pre}-1`; yl=`${pre}-2`; zl=`${pre}-3`; }
+  const ax_={color:tc,gridcolor:grid,zerolinecolor:grid,tickfont:{color:tc,size:10},titlefont:{color:tc,size:11}};
+  const layout={paper_bgcolor:bg,plot_bgcolor:bg,margin:{l:55,r:20,t:20,b:50},
+    legend:{font:{color:tc,size:11},bgcolor:'transparent'},hovermode:'closest'};
+  if(nDims===3){ layout.scene={xaxis:{...ax_,title:xl},yaxis:{...ax_,title:yl},zaxis:{...ax_,title:zl},bgcolor:bg}; }
+  else { layout.dragmode='pan'; layout.xaxis={...ax_,title:xl,showgrid:m==='Custom'}; layout.yaxis={...ax_,title:yl,showgrid:m==='Custom'}; }
+  Plotly.react('plot',traces,layout,{responsive:true,displayModeBar:false,scrollZoom:true});
+  plotinfo.style.display=(n_displayed<n_total)?'block':'none';
+  if(n_displayed<n_total) plotinfo.textContent=`showing ${n_displayed.toLocaleString()} of ${n_total.toLocaleString()} (sampled)`;
+  resetbtn.style.display='block';
+  const el=document.getElementById('plot');
+  el.removeAllListeners?.('plotly_hover'); el.on('plotly_hover',showCard); el.on('plotly_unhover',hideCard);
+}
+function repaint(){ if(last) renderPlot(last); }
+function resetView(){
+  if(!last) return;
+  if(nDims===3){
+    Plotly.relayout('plot',{'scene.xaxis.autorange':true,'scene.yaxis.autorange':true,'scene.zaxis.autorange':true,
+      'scene.camera':{eye:{x:1.25,y:1.25,z:1.25},center:{x:0,y:0,z:0},up:{x:0,y:0,z:1}}});
+  }else{
+    Plotly.relayout('plot',{'xaxis.autorange':true,'yaxis.autorange':true});
+  }
+}
+
+// molecule card
+async function showCard(e){
+  const pt=e.points[0]; if(!pt?.customdata) return;
+  const [ds,nm,smi]=pt.customdata; if(!smi||smi==='nan') return;
+  document.getElementById('card-d').textContent=ds; document.getElementById('card-n').textContent=nm;
+  document.getElementById('card-i').src=''; card.style.display='block';
+  const rect=plotwrap.getBoundingClientRect(); const ex=e.event.clientX-rect.left, ey=e.event.clientY-rect.top;
+  const cw=236,ch=260; let cx=ex+16,cy=ey-ch/2;
+  if(cx+cw>rect.width-10)cx=ex-cw-16; cy=Math.max(10,Math.min(cy,rect.height-ch-10));
+  card.style.left=cx+'px'; card.style.top=cy+'px';
+  try{ const r=await fetch(`${API}/molecule/image`,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({smiles:smi,width:440,height:360})}); const d=await r.json(); if(d.image)document.getElementById('card-i').src=d.image; }catch{}
+}
+function hideCard(){ card.style.display='none'; }
+
+// overlap
+async function computeOverlap(){
+  const vis=Object.entries(datasets).filter(([,d])=>d.visible).map(([n])=>n);
+  if(vis.length<2){ notify('need at least 2 datasets',1); return; }
+  try{
+    const r=await fetch(`${API}/overlap`,{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({session_id:sid,set_names:vis,descriptor_cols:selDescs(),method,n_dimensions:nDims,feature})});
+    const d=await r.json(); if(!r.ok) throw new Error(d.detail);
+    distbody.innerHTML=Object.entries(d.centroid_distances).map(([k,v])=>`<tr><td>${k}</td><td class="v">${v.toFixed(2)}</td></tr>`).join('')||'<tr><td colspan=2>—</td></tr>';
+    spreadbody.innerHTML=Object.entries(d.spread).map(([k,v])=>`<tr><td>${k}</td><td class="v">${v.toFixed(2)}</td></tr>`).join('');
+  }catch(e){ notify(e.message,1); }
+}
+
+// helpers
+function showProg(msg,pct){ progmsg.textContent=msg; pbar.style.width=pct+'%'; prog.classList.add('show'); setTimeout(()=>pbar.style.width='85%',300); }
+function hideProg(){ pbar.style.width='100%'; setTimeout(()=>{prog.classList.remove('show');pbar.style.width='0'},400); }
+let nt; function notify(m,err){ notif.textContent=m; notif.className='show'+(err?' err':''); clearTimeout(nt); nt=setTimeout(()=>notif.className='',3500); }
+
+init();
+</script>
+</body>
+</html>

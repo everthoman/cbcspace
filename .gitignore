@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Runtime session uploads (per-user, ephemeral)
+backend/sessions/
+
+# Server log
+server.log
+
+# Local agent/editor settings
+.claude/
