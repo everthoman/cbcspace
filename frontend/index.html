@@ -311,6 +311,8 @@ async function compute(){
   hideProg();
 }
 
+// default 3D camera: negative-y eye rotates the view so the x-axis (abscissa) sits at the back
+const CAM3D={eye:{x:1.25,y:-1.25,z:1.25},center:{x:0,y:0,z:0},up:{x:0,y:0,z:1}};
 function renderPlot(data){
   const {coords,labels,names,smiles,method:m,explained_variance:ev,axis_labels,n_total,n_displayed}=data;
   const bg=dark?'#0C0E15':'#F4F6FB', grid=dark?'#222838':'#DCE2EE', tc=dark?'#8B93A8':'#5A6480';
@@ -332,10 +334,11 @@ function renderPlot(data){
   else if(m==='PCA'&&ev){ xl=`PC1 (${ev[0].toFixed(1)}%)`; yl=`PC2 (${ev[1].toFixed(1)}%)`; zl=ev[2]?`PC3 (${ev[2].toFixed(1)}%)`:'PC3'; }
   else { const pre=m==='tSNE'?'tSNE':'UMAP'; xl=`${pre}-1`; yl=`${pre}-2`; zl=`${pre}-3`; }
   const ax_={color:tc,gridcolor:grid,zerolinecolor:grid,tickfont:{color:tc,size:10},titlefont:{color:tc,size:11}};
-  const layout={paper_bgcolor:bg,plot_bgcolor:bg,margin:{l:55,r:20,t:20,b:50},
+  const layout={paper_bgcolor:bg,plot_bgcolor:bg,margin:{l:55,r:20,t:20,b:50},uirevision:'keep',
     legend:{font:{color:tc,size:11},bgcolor:'transparent'},hovermode:'closest'};
   if(nDims===3){ const ax3={...ax_,showspikes:false,showline:true,linecolor:tc,linewidth:1,zeroline:true,showbackground:false};
-    layout.scene={xaxis:{...ax3,title:xl},yaxis:{...ax3,title:yl},zaxis:{...ax3,title:zl},bgcolor:bg};
+    layout.scene={xaxis:{...ax3,title:xl},yaxis:{...ax3,title:yl},zaxis:{...ax3,title:zl},bgcolor:bg,
+      camera:CAM3D};
     layout.hovermode=false; } // suppress the native 3D hover marker (events still fire)
   else { layout.dragmode='pan'; layout.xaxis={...ax_,title:xl,showgrid:m==='Custom'}; layout.yaxis={...ax_,title:yl,showgrid:m==='Custom'}; }
   Plotly.react('plot',traces,layout,{responsive:true,displayModeBar:false,scrollZoom:true});
@@ -350,7 +353,7 @@ function resetView(){
   if(!last) return;
   if(nDims===3){
     Plotly.relayout('plot',{'scene.xaxis.autorange':true,'scene.yaxis.autorange':true,'scene.zaxis.autorange':true,
-      'scene.camera':{eye:{x:1.25,y:1.25,z:1.25},center:{x:0,y:0,z:0},up:{x:0,y:0,z:1}}});
+      'scene.camera':CAM3D});
   }else{
     Plotly.relayout('plot',{'xaxis.autorange':true,'yaxis.autorange':true});
   }
