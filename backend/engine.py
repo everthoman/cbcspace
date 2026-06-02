@@ -40,10 +40,13 @@ RNG = np.random.default_rng(0)
 # whenever cuML can't match CPU semantics:
 #   - no Tanimoto/Jaccard metric        -> fingerprint UMAP/t-SNE stay on CPU
 #   - cuML t-SNE is 2D-only             -> 3D t-SNE stays on CPU
-#   - small N: GPU init/transfer > CPU  -> below GPU_MIN_ROWS stays on CPU
-# Any cuML error also falls back, so a GPU hiccup never fails a projection.
+#   - tiny N (< GPU_MIN_ROWS)           -> CPU (numerical floor, already instant)
+# When enabled, GPU is used for every euclidean fit above the floor (it wins from
+# ~1k rows here). Any cuML error also falls back, so a GPU hiccup never fails a
+# projection. The CUDA context is warmed at startup (see warmup()).
 # ---------------------------------------------------------------------------
-GPU_MIN_ROWS = 8_000                  # below this, CPU beats GPU init/transfer
+GPU_MIN_ROWS = 100                    # safety floor only (cuML needs n_samples > n_neighbors
+                                      # /perplexity); GPU wins from ~1k rows on this hardware
 _CUML = None                          # cached module after first probe, or False
 
 
@@ -303,6 +306,9 @@ def warmup() -> None:
     try:
         rng = np.random.default_rng(0)
         Z = rng.random((200, 50)).astype(np.float32)          # euclidean t-SNE + UMAP
+        if _gpu_enabled() and _cuml() is not None:            # init CUDA context (~1.7s)
+            _gpu_umap(Z, 2)
+            _gpu_tsne(Z, 2)
         _fit_tsne(Z, 2)
         _fit_umap(Z, 2)
         bits = (rng.random((200, FP_BITS)) > 0.9).astype(np.float32)
