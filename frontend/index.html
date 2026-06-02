@@ -168,6 +168,9 @@
     <div id="tsne-opt" style="display:none">
       <div class="drow"><input type="checkbox" id="tsne-pca" checked><label for="tsne-pca">PCA pre-reduce to 50D <i>· faster, euclidean</i></label></div>
     </div>
+    <div id="umap-opt" style="display:none">
+      <div class="drow"><input type="checkbox" id="umap-pca"><label for="umap-pca">PCA pre-reduce to 50D <i>· faster, euclidean (GPU)</i></label></div>
+    </div>
 
     <div id="desc-section">
       <div class="lbl">descriptors</div>
@@ -285,7 +288,9 @@ function setFeature(f){ feature=f;
   if(fp && method==='Custom') setMethod('PCA');   // custom axes need named descriptors
   updateTsneOpt();
 }
-function updateTsneOpt(){ document.getElementById('tsne-opt').style.display=(feature==='fingerprint'&&method==='tSNE')?'':'none'; }
+function updateTsneOpt(){ const fp=feature==='fingerprint';
+  document.getElementById('tsne-opt').style.display=(fp&&method==='tSNE')?'':'none';
+  document.getElementById('umap-opt').style.display=(fp&&method==='UMAP')?'':'none'; }
 function setDim(d){ nDims=d; [...dims.children].forEach(b=>b.classList.toggle('on',b.textContent===d+'D')); azrow.style.display=d===3?'flex':'none'; }
 function buildDescs(){ descs.innerHTML=Object.entries(descLabels).map(([k,l])=>`<div class="drow"><input type="checkbox" id="d-${k}" value="${k}" checked><label for="d-${k}">${k} <i>· ${l}</i></label></div>`).join(''); }
 function selDescs(){ return [...descs.querySelectorAll('input:checked')].map(i=>i.value); }
@@ -303,7 +308,8 @@ async function compute(){
     const r=await fetch(`${API}/project`,{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({session_id:sid,set_names:vis,descriptor_cols:selDescs(),method,n_dimensions:nDims,
         x_col:ax.value,y_col:ay.value,z_col:az.value,feature,
-        tsne_pca_reduce:document.getElementById('tsne-pca').checked})});
+        tsne_pca_reduce:document.getElementById('tsne-pca').checked,
+        umap_pca_reduce:document.getElementById('umap-pca').checked})});
     const d=await r.json(); if(!r.ok) throw new Error(d.detail||'projection failed');
     last=d; renderPlot(d);
     status.textContent=`${method} · ${nDims}D · ${feature==='fingerprint'?'ECFP4 · ':''}${d.n_total.toLocaleString()} molecules`;

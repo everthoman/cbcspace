@@ -170,7 +170,10 @@ def _fit_pca_fp(packed: np.ndarray, n: int):
     return coords, (evr * 100.0).tolist()
 
 
-def _fit_umap_fp(packed: np.ndarray, n: int):
+def _fit_umap_fp(packed: np.ndarray, n: int, pca_prereduce: bool = False):
+    # Fast path: PCA-reduce bits to ~50D, then euclidean UMAP (GPU-eligible).
+    if pca_prereduce:
+        return _fit_umap(_fp_to_pca(packed, TSNE_PCA_DIMS), n)
     import umap
     reducer = umap.UMAP(n_components=n, n_neighbors=15, min_dist=0.1,
                         metric="jaccard", random_state=42)  # Tanimoto on bit vectors
@@ -299,12 +302,14 @@ def warmup() -> None:
     to call in a background thread; failures are swallowed."""
     try:
         rng = np.random.default_rng(0)
-        Z = rng.random((200, 50)).astype(np.float32)          # euclidean path
+        Z = rng.random((200, 50)).astype(np.float32)          # euclidean t-SNE + UMAP
         _fit_tsne(Z, 2)
+        _fit_umap(Z, 2)
         bits = (rng.random((200, FP_BITS)) > 0.9).astype(np.float32)
-        from openTSNE import TSNE                              # jaccard/approx path
+        from openTSNE import TSNE                              # jaccard t-SNE (approx NN)
         TSNE(n_components=2, perplexity=30, metric="jaccard", neighbors="approx",
              negative_gradient_method="bh", random_state=42, n_jobs=TSNE_JOBS).fit(bits)
+        _fit_umap_fp(np.packbits((bits > 0).astype(np.uint8), axis=1), 2)  # jaccard UMAP
     except Exception:
         pass
 
@@ -324,11 +329,11 @@ def _downsample(n_rows: int, labels: np.ndarray) -> np.ndarray:
 
 def project(sid, set_names, desc_cols, method, n_dimensions,
             x_col=None, y_col=None, z_col=None, feature="descriptors",
-            tsne_pca_reduce=False):
+            tsne_pca_reduce=False, umap_pca_reduce=False):
     if feature == "fingerprint":
         full, packed = _load_fp_matrix(sid, set_names)
         if method == "UMAP":
-            coords = _fit_umap_fp(packed, n_dimensions)
+            coords = _fit_umap_fp(packed, n_dimensions, pca_prereduce=umap_pca_reduce)
             evr = None
         elif method == "tSNE":
             coords = _fit_tsne_fp(packed, n_dimensions, pca_prereduce=tsne_pca_reduce)

@@ -56,6 +56,7 @@ class ProjectRequest(BaseModel):
     z_col: str | None = None
     feature: str = "descriptors"  # "descriptors" | "fingerprint"
     tsne_pca_reduce: bool = False  # fingerprint t-SNE: PCA pre-reduction (faster)
+    umap_pca_reduce: bool = False  # fingerprint UMAP: PCA pre-reduce -> euclidean (GPU)
 
 
 class OverlapRequest(BaseModel):
@@ -118,7 +119,7 @@ def project(req: ProjectRequest):
         return engine.project(
             req.session_id, req.set_names, req.descriptor_cols, req.method,
             req.n_dimensions, req.x_col, req.y_col, req.z_col, req.feature,
-            req.tsne_pca_reduce,
+            req.tsne_pca_reduce, req.umap_pca_reduce,
         )
     except (KeyError, ValueError) as e:
         raise HTTPException(400, str(e))
