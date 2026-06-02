@@ -23,6 +23,10 @@ from store import load_columns, load_fingerprints
 INCREMENTAL_PCA_THRESHOLD = 200_000   # rows above which IncrementalPCA is used
 UMAP_FIT_CAP = 50_000                 # rows UMAP is fitted on; rest transformed
 TSNE_FIT_CAP = 50_000                 # rows t-SNE is fitted on; rest transformed
+TSNE_FFT_MIN = 10_000                 # below this, Barnes-Hut beats FFT (interpolation)
+# openTSNE n_jobs: -1 (all cores) badly oversubscribes on this shared 36-core host
+# (~17x slower on small N). A moderate cap is near-optimal and neighbourly.
+TSNE_JOBS = min(8, os.cpu_count() or 1)
 DISPLAY_CAP = 150_000                 # max points streamed to the browser
 FP_BATCH = 20_000                     # rows per chunk when unpacking fingerprints
 RNG = np.random.default_rng(0)
@@ -197,16 +201,23 @@ def _fp_to_pca(packed: np.ndarray, dims: int) -> np.ndarray:
     return PCA(n_components=dims).fit_transform(_unpack(packed)).astype(np.float32)
 
 
+def _tsne_grad(n: int, fit_rows: int) -> str:
+    """openTSNE negative-gradient method. FFT (interpolation) is 2D-only and only
+    wins on large fit sets; Barnes-Hut handles up to 3D and is far faster on small N
+    (FFT's fixed grid-setup cost dominates otherwise)."""
+    return "interpolation" if (n <= 2 and fit_rows > TSNE_FFT_MIN) else "bh"
+
+
 def _fit_tsne_fp(packed: np.ndarray, n: int, pca_prereduce: bool = False):
     # Fast path: PCA-reduce bits to ~50D, then Euclidean t-SNE on the dense matrix.
     if pca_prereduce:
         return _fit_tsne(_fp_to_pca(packed, TSNE_PCA_DIMS), n)
     # Default: Tanimoto/Jaccard t-SNE directly on the bit vectors.
     from openTSNE import TSNE
-    grad = "interpolation" if n <= 2 else "bh"
-    tsne = TSNE(n_components=n, perplexity=30, metric="jaccard", neighbors="approx",
-                negative_gradient_method=grad, random_state=42, n_jobs=-1)
     nrows = len(packed)
+    grad = _tsne_grad(n, min(nrows, TSNE_FIT_CAP))
+    tsne = TSNE(n_components=n, perplexity=30, metric="jaccard", neighbors="approx",
+                negative_gradient_method=grad, random_state=42, n_jobs=TSNE_JOBS)
     if nrows > TSNE_FIT_CAP:
         idx = RNG.choice(nrows, TSNE_FIT_CAP, replace=False)
         emb = tsne.fit(_unpack(packed[idx]))
@@ -270,10 +281,9 @@ def _fit_tsne(Xs: np.ndarray, n: int):
     if gpu is not None:
         return gpu
     from openTSNE import TSNE
-    # FFT acceleration only supports 2D; Barnes-Hut handles up to 3D.
-    grad = "interpolation" if n <= 2 else "bh"
+    grad = _tsne_grad(n, min(Xs.shape[0], TSNE_FIT_CAP))
     tsne = TSNE(n_components=n, perplexity=30, metric="euclidean",
-                negative_gradient_method=grad, random_state=42, n_jobs=-1)
+                negative_gradient_method=grad, random_state=42, n_jobs=TSNE_JOBS)
     if Xs.shape[0] > TSNE_FIT_CAP:
         idx = RNG.choice(Xs.shape[0], TSNE_FIT_CAP, replace=False)
         emb = tsne.fit(Xs[idx])      # openTSNE embeddings support out-of-sample
@@ -281,6 +291,22 @@ def _fit_tsne(Xs: np.ndarray, n: int):
     else:
         coords = tsne.fit(Xs)
     return np.asarray(coords)
+
+
+def warmup() -> None:
+    """Compile the numba/pynndescent kernels used by t-SNE on tiny dummy data so
+    the first real projection after a restart isn't slowed by JIT (~8-27s). Safe
+    to call in a background thread; failures are swallowed."""
+    try:
+        rng = np.random.default_rng(0)
+        Z = rng.random((200, 50)).astype(np.float32)          # euclidean path
+        _fit_tsne(Z, 2)
+        bits = (rng.random((200, FP_BITS)) > 0.9).astype(np.float32)
+        from openTSNE import TSNE                              # jaccard/approx path
+        TSNE(n_components=2, perplexity=30, metric="jaccard", neighbors="approx",
+             negative_gradient_method="bh", random_state=42, n_jobs=TSNE_JOBS).fit(bits)
+    except Exception:
+        pass
 
 
 def _downsample(n_rows: int, labels: np.ndarray) -> np.ndarray:

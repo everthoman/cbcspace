@@ -32,6 +32,14 @@ app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
 )
 
+
+@app.on_event("startup")
+def _warmup_jit() -> None:
+    """Pre-compile t-SNE numba/pynndescent kernels off the request path so the
+    first projection after a restart is fast."""
+    import threading
+    threading.Thread(target=engine.warmup, daemon=True).start()
+
 FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024  # 2 GB
 
