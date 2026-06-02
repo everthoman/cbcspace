@@ -85,6 +85,8 @@
     #go:disabled{opacity:.45;cursor:not-allowed}
     #plotwrap{flex:1;display:flex;flex-direction:column;background:var(--bg);position:relative;overflow:hidden}
     #plot{width:100%;flex:1}
+    /* keep the default arrow cursor over the 2D plot instead of Plotly's crosshair/grab */
+    #plot .nsewdrag,#plot .drag{cursor:default !important}
     #plotinfo{position:absolute;top:8px;right:14px;font-size:.7rem;color:var(--ink3);
       background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:.2rem .5rem;display:none}
     #resetbtn{position:absolute;top:8px;left:14px;font-size:.72rem;color:var(--ink2);cursor:pointer;
@@ -319,9 +321,11 @@ function renderPlot(data){
   const ps=parseInt(size.value);
   const traces=Object.entries(groups).map(([lb,g])=>{
     const base={name:lb,mode:'markers',marker:{size:ps,color:g.c,opacity:.8,line:{width:.4,color:'rgba(0,0,0,.25)'}},
-      customdata:g.s.map((s,i)=>[lb,g.n[i],s]),hoverinfo:'none'};
-    return nDims===3?{...base,type:'scatter3d',x:g.x,y:g.y,z:g.z,marker:{...base.marker,line:{width:0}}}
-                    :{...base,type:'scattergl',x:g.x,y:g.y};
+      customdata:g.s.map((s,i)=>[lb,g.n[i],s])};
+    // scatter3d swallows plotly_hover when hoverinfo:'none', so use a transparent hover label instead
+    return nDims===3?{...base,type:'scatter3d',x:g.x,y:g.y,z:g.z,marker:{...base.marker,line:{width:0}},
+                      hovertemplate:'<extra></extra>',hoverlabel:{bgcolor:'rgba(0,0,0,0)',bordercolor:'rgba(0,0,0,0)',font:{color:'rgba(0,0,0,0)'}}}
+                    :{...base,type:'scattergl',x:g.x,y:g.y,hoverinfo:'none'};
   });
   let xl,yl,zl;
   if(axis_labels){ [xl,yl,zl]=axis_labels; }
@@ -330,7 +334,9 @@ function renderPlot(data){
   const ax_={color:tc,gridcolor:grid,zerolinecolor:grid,tickfont:{color:tc,size:10},titlefont:{color:tc,size:11}};
   const layout={paper_bgcolor:bg,plot_bgcolor:bg,margin:{l:55,r:20,t:20,b:50},
     legend:{font:{color:tc,size:11},bgcolor:'transparent'},hovermode:'closest'};
-  if(nDims===3){ layout.scene={xaxis:{...ax_,title:xl},yaxis:{...ax_,title:yl},zaxis:{...ax_,title:zl},bgcolor:bg}; }
+  if(nDims===3){ const ax3={...ax_,showspikes:false,showline:true,linecolor:tc,linewidth:1,zeroline:true,showbackground:false};
+    layout.scene={xaxis:{...ax3,title:xl},yaxis:{...ax3,title:yl},zaxis:{...ax3,title:zl},bgcolor:bg};
+    layout.hovermode=false; } // suppress the native 3D hover marker (events still fire)
   else { layout.dragmode='pan'; layout.xaxis={...ax_,title:xl,showgrid:m==='Custom'}; layout.yaxis={...ax_,title:yl,showgrid:m==='Custom'}; }
   Plotly.react('plot',traces,layout,{responsive:true,displayModeBar:false,scrollZoom:true});
   plotinfo.style.display=(n_displayed<n_total)?'block':'none';
@@ -351,12 +357,15 @@ function resetView(){
 }
 
 // molecule card
+let mouseX=0,mouseY=0; addEventListener('mousemove',e=>{mouseX=e.clientX;mouseY=e.clientY;},true);
 async function showCard(e){
   const pt=e.points[0]; if(!pt?.customdata) return;
   const [ds,nm,smi]=pt.customdata; if(!smi||smi==='nan') return;
   document.getElementById('card-d').textContent=ds; document.getElementById('card-n').textContent=nm;
   document.getElementById('card-i').src=''; card.style.display='block';
-  const rect=plotwrap.getBoundingClientRect(); const ex=e.event.clientX-rect.left, ey=e.event.clientY-rect.top;
+  // scatter3d hover events carry no e.event, so fall back to the tracked cursor position
+  const cx0=e.event?.clientX??mouseX, cy0=e.event?.clientY??mouseY;
+  const rect=plotwrap.getBoundingClientRect(); const ex=cx0-rect.left, ey=cy0-rect.top;
   const cw=236,ch=260; let cx=ex+16,cy=ey-ch/2;
   if(cx+cw>rect.width-10)cx=ex-cw-16; cy=Math.max(10,Math.min(cy,rect.height-ch-10));
   card.style.left=cx+'px'; card.style.top=cy+'px';
