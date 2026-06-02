@@ -9,6 +9,8 @@ Scales to multi-million-row inputs via:
 """
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA, IncrementalPCA
@@ -24,6 +26,97 @@ TSNE_FIT_CAP = 50_000                 # rows t-SNE is fitted on; rest transforme
 DISPLAY_CAP = 150_000                 # max points streamed to the browser
 FP_BATCH = 20_000                     # rows per chunk when unpacking fingerprints
 RNG = np.random.default_rng(0)
+
+# ---------------------------------------------------------------------------
+# Optional GPU acceleration (RAPIDS cuML).
+#
+# Enabled with CBCSPACE_GPU=1. cuML accelerates the *euclidean* descriptor
+# paths (PCA / UMAP / t-SNE) by ~5-180x at tens of thousands of molecules.
+# It is NOT a full drop-in, so the helpers below return None (-> CPU fallback)
+# whenever cuML can't match CPU semantics:
+#   - no Tanimoto/Jaccard metric        -> fingerprint UMAP/t-SNE stay on CPU
+#   - cuML t-SNE is 2D-only             -> 3D t-SNE stays on CPU
+#   - small N: GPU init/transfer > CPU  -> below GPU_MIN_ROWS stays on CPU
+# Any cuML error also falls back, so a GPU hiccup never fails a projection.
+# ---------------------------------------------------------------------------
+GPU_MIN_ROWS = 8_000                  # below this, CPU beats GPU init/transfer
+_CUML = None                          # cached module after first probe, or False
+
+
+def _gpu_enabled() -> bool:
+    return os.environ.get("CBCSPACE_GPU", "").lower() in ("1", "true", "yes", "on")
+
+
+def _cuml():
+    """Lazily import cuML once; cache the module, or False if unavailable."""
+    global _CUML
+    if _CUML is None:
+        try:
+            import cuml
+            _CUML = cuml
+        except Exception:
+            _CUML = False
+    return _CUML or None
+
+
+def _to_numpy(a) -> np.ndarray:
+    """Bring a cuML result (cupy array / cudf frame) back to a float32 ndarray."""
+    if hasattr(a, "to_numpy"):       # cudf DataFrame/Series
+        a = a.to_numpy()
+    elif hasattr(a, "get"):          # cupy ndarray
+        a = a.get()
+    return np.asarray(a, dtype=np.float32)
+
+
+def _use_gpu(nrows: int) -> bool:
+    return _gpu_enabled() and nrows >= GPU_MIN_ROWS and _cuml() is not None
+
+
+def _gpu_pca(Xs: np.ndarray, n: int):
+    """GPU PCA; returns (coords, evr%) or None to fall back to CPU."""
+    if not _use_gpu(Xs.shape[0]) or Xs.shape[0] > INCREMENTAL_PCA_THRESHOLD:
+        return None
+    try:
+        from cuml import PCA as cuPCA
+        pca = cuPCA(n_components=n)
+        coords = _to_numpy(pca.fit_transform(np.ascontiguousarray(Xs)))
+        evr = _to_numpy(pca.explained_variance_ratio_)
+        return coords, (evr * 100.0).tolist()
+    except Exception:
+        return None
+
+
+def _gpu_umap(Xs: np.ndarray, n: int):
+    """GPU UMAP (euclidean only); returns coords or None to fall back to CPU."""
+    if not _use_gpu(Xs.shape[0]):
+        return None
+    try:
+        from cuml.manifold import UMAP as cuUMAP
+        reducer = cuUMAP(n_components=n, n_neighbors=15, min_dist=0.1, random_state=42)
+        X = np.ascontiguousarray(Xs)
+        if Xs.shape[0] > UMAP_FIT_CAP:
+            idx = RNG.choice(Xs.shape[0], UMAP_FIT_CAP, replace=False)
+            reducer.fit(X[idx])
+            coords = reducer.transform(X)
+        else:
+            coords = reducer.fit_transform(X)
+        return _to_numpy(coords)
+    except Exception:
+        return None
+
+
+def _gpu_tsne(Xs: np.ndarray, n: int):
+    """GPU t-SNE (euclidean, 2D-only, no out-of-sample); else None for CPU."""
+    # cuML t-SNE is 2D-only and has no .transform(), so only when the whole
+    # set fits in one fit (<= cap). Larger sets use the CPU sample+transform.
+    if n != 2 or Xs.shape[0] > TSNE_FIT_CAP or not _use_gpu(Xs.shape[0]):
+        return None
+    try:
+        from cuml.manifold import TSNE as cuTSNE
+        tsne = cuTSNE(n_components=n, perplexity=30, random_state=42)
+        return _to_numpy(tsne.fit_transform(np.ascontiguousarray(Xs)))
+    except Exception:
+        return None
 
 
 def _load_matrix(sid: str, set_names: list[str], desc_cols: list[str]):
@@ -139,6 +232,9 @@ def _fp_centroid_spread(packed: np.ndarray):
 
 
 def _fit_pca(Xs: np.ndarray, n: int):
+    gpu = _gpu_pca(Xs, n)
+    if gpu is not None:
+        return gpu
     if Xs.shape[0] > INCREMENTAL_PCA_THRESHOLD:
         ipca = IncrementalPCA(n_components=n)
         batch = 50_000
@@ -155,6 +251,9 @@ def _fit_pca(Xs: np.ndarray, n: int):
 
 
 def _fit_umap(Xs: np.ndarray, n: int):
+    gpu = _gpu_umap(Xs, n)
+    if gpu is not None:
+        return gpu
     import umap
     reducer = umap.UMAP(n_components=n, n_neighbors=15, min_dist=0.1, random_state=42)
     if Xs.shape[0] > UMAP_FIT_CAP:
@@ -167,6 +266,9 @@ def _fit_umap(Xs: np.ndarray, n: int):
 
 
 def _fit_tsne(Xs: np.ndarray, n: int):
+    gpu = _gpu_tsne(Xs, n)
+    if gpu is not None:
+        return gpu
     from openTSNE import TSNE
     # FFT acceleration only supports 2D; Barnes-Hut handles up to 3D.
     grad = "interpolation" if n <= 2 else "bh"
