@@ -17,7 +17,6 @@ import numpy as np
 # worker (see _descriptor_funcs) in this exact same order.
 DESCRIPTOR_LABELS: dict[str, str] = {
     "MW":             "Molecular Weight",
-    "ExactMW":        "Exact Molecular Weight",
     "cLogP":          "Calculated LogP",
     "tPSA":           "Topological PSA",
     "HBD":            "H-Bond Donors",
@@ -64,7 +63,6 @@ def _descriptor_funcs():
 
     return [
         ("MW",             Descriptors.MolWt),
-        ("ExactMW",        Descriptors.ExactMolWt),
         ("cLogP",          Crippen.MolLogP),
         ("tPSA",           Descriptors.TPSA),
         ("HBD",            Lipinski.NumHDonors),
