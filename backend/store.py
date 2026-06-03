@@ -25,7 +25,7 @@ DEFAULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 _SMILES_HINTS = ("smiles", "smi", "canonical_smiles", "structure")
 _NAME_HINTS = ("name", "id", "title", "molecule", "compound", "compound_id",
-               "chembl_id", "zinc_id")
+               "eos_id", "chembl_id", "zinc_id")
 _SAFE = re.compile(r"[^A-Za-z0-9 _.\-]")
 
 
