@@ -1,11 +1,10 @@
-"""Projection + overlap engine.
+"""Projection engine.
 
 Scales to multi-million-row inputs via:
   - IncrementalPCA (chunked partial_fit) above a row threshold,
   - UMAP fit on a bounded sample then .transform() of the full set,
   - stratified display downsampling so the browser receives a bounded number of
-    points even when the underlying library is huge (overlap stats still use
-    the full data).
+    points even when the underlying library is huge.
 """
 from __future__ import annotations
 
@@ -29,9 +28,6 @@ TSNE_FFT_MIN = 10_000                 # below this, Barnes-Hut beats FFT (interp
 TSNE_JOBS = min(8, os.cpu_count() or 1)
 DISPLAY_CAP = 150_000                 # max points streamed to the browser
 FP_BATCH = 20_000                     # rows per chunk when unpacking fingerprints
-COVERAGE_QUERY_CAP = 4_000            # query molecules sampled per set for NN coverage
-COVERAGE_REF_CAP = 30_000            # reference molecules sampled per set for NN coverage
-COVERAGE_Q_CHUNK = 2_048              # query rows per matmul chunk
 RNG = np.random.default_rng(0)
 
 # ---------------------------------------------------------------------------
@@ -237,56 +233,6 @@ def _fit_tsne_fp(packed: np.ndarray, n: int, pca_prereduce: bool = False):
     return np.asarray(coords)
 
 
-def _sample_rows(packed: np.ndarray, cap: int) -> np.ndarray:
-    """Random row subsample (without replacement) to bound coverage compute."""
-    if len(packed) <= cap:
-        return packed
-    idx = RNG.choice(len(packed), cap, replace=False)
-    return packed[idx]
-
-
-def _tanimoto_coverage(packed_q: np.ndarray, packed_r: np.ndarray,
-                       thr: float, gpu: bool) -> float:
-    """Percent of query fingerprints whose nearest neighbour in the reference set
-    has Tanimoto >= thr. Tanimoto via bit dot-products: |a&b| = a·b,
-    |a|b| = popcount(a)+popcount(b)-|a&b|. Chunked over queries; GPU when enabled."""
-    if len(packed_q) == 0 or len(packed_r) == 0:
-        return 0.0
-    xp = np
-    if gpu:
-        try:
-            import cupy as cp
-            xp = cp
-        except Exception:
-            xp = np
-    R = xp.asarray(np.unpackbits(packed_r, axis=1), dtype=xp.float32)   # (r, FP_BITS)
-    cntR = R.sum(axis=1)                                                # (r,)
-    hits = 0
-    for i in range(0, len(packed_q), COVERAGE_Q_CHUNK):
-        Q = xp.asarray(np.unpackbits(packed_q[i:i + COVERAGE_Q_CHUNK], axis=1),
-                       dtype=xp.float32)                                # (c, FP_BITS)
-        cntQ = Q.sum(axis=1)
-        inter = Q @ R.T                                                 # (c, r)
-        denom = cntQ[:, None] + cntR[None, :] - inter
-        tan = xp.where(denom > 0, inter / denom, xp.float32(0.0))
-        hits += int((tan.max(axis=1) >= thr).sum())
-    return 100.0 * hits / len(packed_q)
-
-
-def _fp_centroid_spread(packed: np.ndarray):
-    """Mean bit-frequency centroid and mean euclidean spread, computed in chunks."""
-    m = len(packed)
-    s = np.zeros(FP_BITS, dtype=np.float64)
-    for i in range(0, m, FP_BATCH):
-        s += _unpack(packed[i:i + FP_BATCH]).sum(axis=0)
-    c = s / m
-    ss = 0.0
-    for i in range(0, m, FP_BATCH):
-        d = _unpack(packed[i:i + FP_BATCH]) - c
-        ss += float((d * d).sum())
-    return c, float(np.sqrt(ss / m))
-
-
 def _fit_pca(Xs: np.ndarray, n: int):
     gpu = _gpu_pca(Xs, n)
     if gpu is not None:
@@ -423,81 +369,4 @@ def project(sid, set_names, desc_cols, method, n_dimensions,
         "axis_labels": axis_labels,
         "n_total": int(len(full)),
         "n_displayed": int(len(keep)),
-    }
-
-
-def overlap(sid, set_names, desc_cols, feature="descriptors", tanimoto_threshold=0.7):
-    """Pairwise overlap metrics across sets (full data, independent of the
-    display cap):
-      - centroid_distance: distance between set centroids in the feature space
-      - separation:        centroid_distance / pooled spread (unitless effect
-                           size; ~0 = centres coincide, >~2 = well separated)
-      - coverage:          directional Tanimoto NN coverage — % of A with a
-                           neighbour in B at Tanimoto >= threshold (always from
-                           fingerprints, independent of the feature toggle)
-    Descriptor mode centroid/spread use standardized descriptor space;
-    fingerprint mode uses bit-frequency (Tanimoto-style) space."""
-    centroids, spread, counts = {}, {}, {}
-    fps = {}
-    for name in set_names:
-        try:
-            _, packed = load_fingerprints(sid, name)
-            fps[name] = packed if len(packed) else None
-        except Exception:
-            fps[name] = None
-
-    if feature == "fingerprint":
-        for name in set_names:
-            packed = fps[name]
-            if packed is None:
-                continue
-            centroids[name], spread[name] = _fp_centroid_spread(packed)
-            counts[name] = int(len(packed))
-    else:
-        if not desc_cols:
-            raise ValueError("select at least one descriptor")
-        full, X = _load_matrix(sid, set_names, desc_cols)
-        Xs = StandardScaler().fit_transform(X)
-        labels = full["__label"].to_numpy()
-        for name in set_names:
-            pts = Xs[labels == name]
-            if len(pts) == 0:
-                continue
-            c = pts.mean(axis=0)
-            centroids[name] = c
-            spread[name] = float(np.sqrt(((pts - c) ** 2).sum(axis=1)).mean())
-            counts[name] = int(len(pts))
-
-    names = list(centroids)
-    distance = {a: {a: 0.0} for a in names}
-    separation = {a: {a: 0.0} for a in names}
-    for i in range(len(names)):
-        for j in range(i + 1, len(names)):
-            a, b = names[i], names[j]
-            d = float(np.linalg.norm(centroids[a] - centroids[b]))
-            pooled = (spread[a] + spread[b]) / 2 or 1e-9
-            distance[a][b] = distance[b][a] = round(d, 3)
-            separation[a][b] = separation[b][a] = round(d / pooled, 3)
-
-    # Structural overlap: directional Tanimoto nearest-neighbour coverage.
-    coverage = None
-    struct = [n for n in names if fps.get(n) is not None]
-    if len(struct) >= 2:
-        gpu = _gpu_enabled()
-        coverage = {a: {a: 100.0} for a in struct}
-        for a in struct:
-            q = _sample_rows(fps[a], COVERAGE_QUERY_CAP)
-            for b in struct:
-                if a == b:
-                    continue
-                r = _sample_rows(fps[b], COVERAGE_REF_CAP)
-                coverage[a][b] = round(_tanimoto_coverage(q, r, tanimoto_threshold, gpu), 1)
-
-    return {
-        "sets": [{"name": n, "n": counts[n], "spread": round(spread[n], 3)} for n in names],
-        "centroid_distance": distance,
-        "separation": separation,
-        "coverage": coverage,
-        "tanimoto_threshold": tanimoto_threshold,
-        "structural_available": coverage is not None,
     }

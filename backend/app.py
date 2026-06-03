@@ -4,7 +4,6 @@ Replicates the sculpturatus.com/chemscape API surface:
   GET    /session/new
   POST   /upload
   POST   /project
-  POST   /overlap
   POST   /molecule/image
   DELETE /session/{sid}/set/{name}
 
@@ -60,16 +59,6 @@ class ProjectRequest(BaseModel):
     feature: str = "descriptors"  # "descriptors" | "fingerprint"
     tsne_pca_reduce: bool = False  # fingerprint t-SNE: PCA pre-reduction (faster)
     umap_pca_reduce: bool = False  # fingerprint UMAP: PCA pre-reduce -> euclidean (GPU)
-
-
-class OverlapRequest(BaseModel):
-    session_id: str
-    set_names: list[str]
-    descriptor_cols: list[str] = []
-    method: str = "PCA"
-    n_dimensions: int = 2
-    feature: str = "descriptors"
-    tanimoto_threshold: float = 0.7
 
 
 class ImageRequest(BaseModel):
@@ -140,17 +129,6 @@ def project(req: ProjectRequest):
             req.n_dimensions, req.x_col, req.y_col, req.z_col, req.feature,
             req.tsne_pca_reduce, req.umap_pca_reduce,
         )
-    except (KeyError, ValueError) as e:
-        raise HTTPException(400, str(e))
-
-
-@app.post("/overlap")
-def overlap(req: OverlapRequest):
-    if len(req.set_names) < 2:
-        raise HTTPException(400, "need at least 2 datasets")
-    try:
-        return engine.overlap(req.session_id, req.set_names, req.descriptor_cols, req.feature,
-                              req.tanimoto_threshold)
     except (KeyError, ValueError) as e:
         raise HTTPException(400, str(e))
 
