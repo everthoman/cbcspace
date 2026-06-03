@@ -84,6 +84,13 @@ class DefaultSaveRequest(BaseModel):
     name: str | None = None  # library name to publish as (defaults to set_name)
 
 
+class SearchRequest(BaseModel):
+    session_id: str
+    set_names: list[str]
+    query: str
+    limit: int = 50
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 @app.get("/session/new")
 def session_new():
@@ -162,6 +169,31 @@ def molecule_image(req: ImageRequest):
     png = d.GetDrawingText()
     b64 = base64.b64encode(png).decode()
     return {"image": f"data:image/png;base64,{b64}"}
+
+
+@app.post("/search")
+def search(req: SearchRequest):
+    """Find molecules by identifier substring across the selected sets.
+
+    Reads from the stored parquets, so it finds hits even when a point was
+    sampled out of the displayed projection. Case-insensitive substring match.
+    """
+    q = req.query.strip().lower()
+    if not q:
+        return {"matches": [], "truncated": False}
+    matches: list[dict] = []
+    for sn in req.set_names:
+        try:
+            df = store.load_columns(req.session_id, sn, ["name", "smiles"])
+        except KeyError:
+            continue
+        names = df["name"].astype(str)
+        hit = df[names.str.lower().str.contains(q, regex=False)]
+        for nm, smi in zip(hit["name"].astype(str), hit["smiles"].astype(str)):
+            matches.append({"dataset": sn, "name": nm, "smiles": smi})
+            if len(matches) >= req.limit:
+                return {"matches": matches, "truncated": True}
+    return {"matches": matches, "truncated": False}
 
 
 @app.post("/default/save")

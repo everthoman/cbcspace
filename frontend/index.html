@@ -93,6 +93,19 @@
     #resetbtn{position:absolute;top:8px;left:14px;font-size:.72rem;color:var(--ink2);cursor:pointer;
       background:var(--panel);border:1px solid var(--line2);border-radius:5px;padding:.28rem .6rem;display:none;z-index:21;transition:.15s}
     #resetbtn:hover{border-color:var(--acc);color:var(--acc)}
+    #searchwrap{position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:22;width:248px;display:none}
+    #searchbox{width:100%;background:var(--panel);border:1px solid var(--line2);border-radius:6px;
+      padding:.36rem .6rem;color:var(--ink);font-size:.78rem;outline:none;transition:.15s}
+    #searchbox:focus{border-color:var(--acc)}
+    #searchres{margin-top:4px;background:var(--panel);border:1px solid var(--line);border-radius:6px;
+      max-height:260px;overflow:auto;display:none;box-shadow:0 6px 20px rgba(0,0,0,.18)}
+    #searchres.show{display:block}
+    .sres{padding:.34rem .55rem;cursor:pointer;border-bottom:1px solid var(--line);line-height:1.25}
+    .sres:last-child{border-bottom:none}
+    .sres:hover{background:var(--soft)}
+    .sres .nm{font-size:.76rem;color:var(--ink);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .sres .ds{font-size:.64rem;color:var(--ink3)}
+    .snon{font-size:.72rem;color:var(--ink3);padding:.45rem .55rem}
     #empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
       flex-direction:column;gap:.4rem;pointer-events:none;color:var(--ink3)}
     #empty.hide{display:none}
@@ -190,6 +203,11 @@
   <div id="plotwrap">
     <div id="empty"><div class="p">load a dataset and compute a projection</div></div>
     <div id="plot"></div>
+    <div id="searchwrap">
+      <input id="searchbox" placeholder="🔍 search identifier…" autocomplete="off"
+        oninput="onSearchInput()" onkeydown="if(event.key==='Escape')clearSearch()">
+      <div id="searchres"></div>
+    </div>
     <button id="resetbtn" onclick="resetView()" title="center & fit">⤢ reset view</button>
     <div id="plotinfo"></div>
     <div id="card"><div class="cd" id="card-d"></div><img id="card-i" src="" alt=""><div class="cn" id="card-n"></div></div>
@@ -208,7 +226,7 @@
 
 <script>
 const API = '';  // same origin
-let sid=null, datasets={}, defaults=new Set(), method='PCA', nDims=2, feature='descriptors', dark=false, last=null, descLabels={}, ci=0, canSaveDefault=false;
+let sid=null, datasets={}, defaults=new Set(), method='PCA', nDims=2, feature='descriptors', dark=false, last=null, descLabels={}, ci=0, canSaveDefault=false, searchHL=null, cardPinned=false;
 const COLORS=['#3B5BFF','#FF6B6B','#51CF66','#FFD43B','#CC5DE8','#FF922B','#74C0FC','#F06595','#A9E34B','#13B7A6'];
 const COLOR_OPTS=[['#3B5BFF','blue'],['#FF6B6B','coral'],['#51CF66','green'],['#FFD43B','yellow'],['#CC5DE8','purple'],
   ['#FF922B','orange'],['#74C0FC','sky'],['#F06595','pink'],['#A9E34B','lime'],['#13B7A6','teal'],['#FF4444','red'],['#FFFFFF','white']];
@@ -274,7 +292,7 @@ function setColor(n,c){ datasets[n].color=c; const dot=document.getElementById('
 async function removeSet(n){
   if(sid) await fetch(`${API}/session/${sid}/set/${encodeURIComponent(n)}`,{method:'DELETE'});
   delete datasets[n]; renderList();
-  if(!Object.keys(datasets).length){ go.disabled=true; empty.classList.remove('hide'); Plotly.purge('plot'); last=null; plotinfo.style.display='none'; resetbtn.style.display='none'; }
+  if(!Object.keys(datasets).length){ go.disabled=true; empty.classList.remove('hide'); Plotly.purge('plot'); last=null; plotinfo.style.display='none'; resetbtn.style.display='none'; clearSearch(); searchwrap.style.display='none'; }
 }
 async function saveDefault(n){
   const name=(prompt(`Publish "${n}" as a shared default library.\nLibrary name:`, n)||'').trim();
@@ -356,6 +374,14 @@ function renderPlot(data){
                       hovertemplate:'<extra></extra>',hoverlabel:{bgcolor:'rgba(0,0,0,0)',bordercolor:'rgba(0,0,0,0)',font:{color:'rgba(0,0,0,0)'}}}
                     :{...base,type:'scattergl',x:g.x,y:g.y,hoverinfo:'none'};
   });
+  if(searchHL && searchHL.idx>=0 && searchHL.idx<coords.length){
+    const c=coords[searchHL.idx], hs=(nDims===3?ps*0.6:ps)*2.4+8;
+    const hm={name:'match',mode:'markers',showlegend:false,hoverinfo:'skip',
+      marker:{symbol:'circle-open',size:hs,color:'#FF2D55',line:{width:3,color:'#FF2D55'}}};
+    traces.push(nDims===3?{...hm,type:'scatter3d',x:[c[0]],y:[c[1]],z:[c[2]]}
+                         :{...hm,type:'scattergl',x:[c[0]],y:[c[1]]});
+  }
+  searchwrap.style.display='block';
   let xl,yl,zl;
   if(axis_labels){ [xl,yl,zl]=axis_labels; }
   else if(m==='PCA'&&ev){ xl=`PC1 (${ev[0].toFixed(1)}%)`; yl=`PC2 (${ev[1].toFixed(1)}%)`; zl=ev[2]?`PC3 (${ev[2].toFixed(1)}%)`:'PC3'; }
@@ -388,21 +414,74 @@ function resetView(){
 
 // molecule card
 let mouseX=0,mouseY=0; addEventListener('mousemove',e=>{mouseX=e.clientX;mouseY=e.clientY;},true);
+async function loadCardImage(smi){
+  document.getElementById('card-i').src='';
+  try{ const r=await fetch(`${API}/molecule/image`,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({smiles:smi,width:440,height:360})}); const d=await r.json(); if(d.image)document.getElementById('card-i').src=d.image; }catch{}
+}
 async function showCard(e){
   const pt=e.points[0]; if(!pt?.customdata) return;
   const [ds,nm,smi]=pt.customdata; if(!smi||smi==='nan') return;
+  cardPinned=false;  // hovering takes over from any pinned search result
   document.getElementById('card-d').textContent=ds; document.getElementById('card-n').textContent=nm;
-  document.getElementById('card-i').src=''; card.style.display='block';
+  card.style.display='block';
   // scatter3d hover events carry no e.event, so fall back to the tracked cursor position
   const cx0=e.event?.clientX??mouseX, cy0=e.event?.clientY??mouseY;
   const rect=plotwrap.getBoundingClientRect(); const ex=cx0-rect.left, ey=cy0-rect.top;
   const cw=236,ch=260; let cx=ex+16,cy=ey-ch/2;
   if(cx+cw>rect.width-10)cx=ex-cw-16; cy=Math.max(10,Math.min(cy,rect.height-ch-10));
   card.style.left=cx+'px'; card.style.top=cy+'px';
-  try{ const r=await fetch(`${API}/molecule/image`,{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({smiles:smi,width:440,height:360})}); const d=await r.json(); if(d.image)document.getElementById('card-i').src=d.image; }catch{}
+  loadCardImage(smi);
 }
-function hideCard(){ card.style.display='none'; }
+function hideCard(){ if(cardPinned) return; card.style.display='none'; }
+function pinCard(ds,nm,smi){
+  cardPinned=true;
+  document.getElementById('card-d').textContent=ds; document.getElementById('card-n').textContent=nm;
+  card.style.display='block';
+  const cw=236; card.style.left=Math.max(10,plotwrap.clientWidth-cw-14)+'px'; card.style.top='44px';
+  loadCardImage(smi);
+}
+
+// identifier search
+let searchTimer, searchMatches=[];
+function esc(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function onSearchInput(){ clearTimeout(searchTimer); searchTimer=setTimeout(doSearch,220); }
+async function doSearch(){
+  const q=searchbox.value.trim();
+  if(!q){ searchres.className=''; searchres.innerHTML=''; return; }
+  const vis=Object.entries(datasets).filter(([,d])=>d.visible).map(([n])=>n);
+  if(!vis.length){ searchres.innerHTML='<div class="snon">no datasets selected</div>'; searchres.className='show'; return; }
+  try{
+    const r=await fetch(`${API}/search`,{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({session_id:sid,set_names:vis,query:q,limit:50})});
+    const d=await r.json(); if(!r.ok) throw new Error(d.detail||'search failed');
+    renderResults(d.matches||[], d.truncated);
+  }catch(e){ notify(e.message,1); }
+}
+function renderResults(matches, truncated){
+  searchMatches=matches;
+  if(!matches.length){ searchres.innerHTML='<div class="snon">no matches</div>'; searchres.className='show'; return; }
+  searchres.innerHTML=matches.map((m,i)=>
+    `<div class="sres" onclick="pickResult(${i})"><div class="nm">${esc(m.name)}</div><div class="ds">${esc(m.dataset)}</div></div>`
+  ).join('')+(truncated?'<div class="snon">showing first 50 — refine query</div>':'');
+  searchres.className='show';
+}
+function pickResult(i){
+  const m=searchMatches[i]; if(!m) return;
+  searchres.className='';
+  let idx=-1;
+  if(last && last.names){ idx=last.names.findIndex((nm,k)=> String(nm)===m.name && String(last.labels[k])===m.dataset); }
+  searchHL = idx>=0 ? {idx} : null;
+  pinCard(m.dataset, m.name, m.smiles);
+  if(last) renderPlot(last);
+  if(idx<0) notify('found — not shown on plot (sampled out of view)');
+}
+function clearSearch(){
+  searchbox.value=''; searchres.className=''; searchres.innerHTML=''; searchMatches=[];
+  cardPinned=false; card.style.display='none';
+  if(searchHL){ searchHL=null; if(last) renderPlot(last); }
+}
+addEventListener('click',e=>{ if(!searchwrap.contains(e.target)) searchres.className=''; });
 
 // overlap
 async function computeOverlap(){
