@@ -39,6 +39,11 @@
       margin:.9rem 0 .45rem;display:flex;align-items:center;gap:.45rem}
     .lbl::after{content:'';flex:1;height:1px;background:var(--line)}
     .sub{font-size:.64rem;font-weight:700;letter-spacing:.08em;color:var(--ink3);text-transform:uppercase;margin:.55rem 0 .25rem .15rem}
+    .subrow{display:flex;align-items:center;justify-content:space-between;margin:.55rem 0 .25rem .15rem}
+    .subrow .sub{margin:0}
+    .togg{font-size:.62rem;font-weight:700;color:var(--ink3)}
+    .togg a{cursor:pointer;color:var(--acc)}
+    .togg a:hover{text-decoration:underline}
     #drop{border:1.5px dashed var(--line2);border-radius:8px;padding:1.15rem .5rem;text-align:center;
       cursor:pointer;transition:.15s;color:var(--ink3);font-size:.78rem}
     #drop:hover,#drop.over{border-color:var(--acc);color:var(--acc);background:var(--accbg)}
@@ -155,7 +160,8 @@
       <div class="ic">⊕</div><div>drop csv / tsv / excel</div>
     </div>
     <input type="file" id="file" accept=".csv,.tsv,.xlsx,.xls" onchange="pick(event)">
-    <div class="sub">default libraries</div>
+    <div class="subrow"><span class="sub">default libraries</span>
+      <span class="togg"><a onclick="allDefaults(1)">all</a> · <a onclick="allDefaults(0)">none</a></span></div>
     <div id="defaults"></div>
     <div class="sub" id="userlbl" style="display:none">your libraries</div>
     <div id="userlist"></div>
@@ -333,6 +339,7 @@ function setDim(d){ nDims=d; [...dims.children].forEach(b=>b.classList.toggle('o
 function buildDescs(){ descs.innerHTML=Object.entries(descLabels).map(([k,l])=>`<div class="drow"><input type="checkbox" id="d-${k}" value="${k}" checked><label for="d-${k}">${k} <i>· ${l}</i></label></div>`).join(''); }
 function selDescs(){ return [...descs.querySelectorAll('input:checked')].map(i=>i.value); }
 function allDesc(on){ descs.querySelectorAll('input').forEach(i=>i.checked=!!on); }
+function allDefaults(v){ defaults.forEach(n=>{ if(datasets[n]) datasets[n].visible=v; }); renderList(); }
 function buildAxes(){ const o=Object.entries(descLabels).map(([k,l])=>`<option value="${k}">${k} · ${l}</option>`).join('');
   ['ax','ay','az'].forEach(id=>document.getElementById(id).innerHTML=o); ay.selectedIndex=2; az.selectedIndex=3; }
 
