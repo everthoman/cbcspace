@@ -94,9 +94,14 @@
       background:var(--panel);border:1px solid var(--line2);border-radius:5px;padding:.28rem .6rem;display:none;z-index:21;transition:.15s}
     #resetbtn:hover{border-color:var(--acc);color:var(--acc)}
     #searchwrap{position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:22;width:248px;display:none}
+    #searchrow{position:relative}
     #searchbox{width:100%;background:var(--panel);border:1px solid var(--line2);border-radius:6px;
-      padding:.36rem .6rem;color:var(--ink);font-size:.78rem;outline:none;transition:.15s}
+      padding:.36rem 1.7rem .36rem .6rem;color:var(--ink);font-size:.78rem;outline:none;transition:.15s}
     #searchbox:focus{border-color:var(--acc)}
+    #searchclear{position:absolute;right:6px;top:50%;transform:translateY(-50%);display:none;
+      background:none;border:none;color:var(--ink3);cursor:pointer;font-size:.82rem;padding:.1rem .25rem;line-height:1}
+    #searchclear:hover{color:var(--warn)}
+    #searchwrap.active #searchclear{display:block}
     #searchres{margin-top:4px;background:var(--panel);border:1px solid var(--line);border-radius:6px;
       max-height:260px;overflow:auto;display:none;box-shadow:0 6px 20px rgba(0,0,0,.18)}
     #searchres.show{display:block}
@@ -204,8 +209,11 @@
     <div id="empty"><div class="p">load a dataset and compute a projection</div></div>
     <div id="plot"></div>
     <div id="searchwrap">
-      <input id="searchbox" placeholder="🔍 search identifier…" autocomplete="off"
-        oninput="onSearchInput()" onkeydown="if(event.key==='Escape')clearSearch()">
+      <div id="searchrow">
+        <input id="searchbox" placeholder="🔍 search identifier…" autocomplete="off"
+          oninput="onSearchInput()" onkeydown="if(event.key==='Escape')clearSearch()">
+        <button id="searchclear" title="clear search & highlight" onclick="clearSearch()">✕</button>
+      </div>
       <div id="searchres"></div>
     </div>
     <button id="resetbtn" onclick="resetView()" title="center & fit">⤢ reset view</button>
@@ -445,7 +453,8 @@ function pinCard(ds,nm,smi){
 // identifier search
 let searchTimer, searchMatches=[];
 function esc(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-function onSearchInput(){ clearTimeout(searchTimer); searchTimer=setTimeout(doSearch,220); }
+function updateSearchClear(){ searchwrap.classList.toggle('active', !!(searchbox.value || searchHL)); }
+function onSearchInput(){ updateSearchClear(); clearTimeout(searchTimer); searchTimer=setTimeout(doSearch,220); }
 async function doSearch(){
   const q=searchbox.value.trim();
   if(!q){ searchres.className=''; searchres.innerHTML=''; return; }
@@ -472,6 +481,7 @@ function pickResult(i){
   let idx=-1;
   if(last && last.names){ idx=last.names.findIndex((nm,k)=> String(nm)===m.name && String(last.labels[k])===m.dataset); }
   searchHL = idx>=0 ? {idx} : null;
+  updateSearchClear();
   pinCard(m.dataset, m.name, m.smiles);
   if(last) renderPlot(last);
   if(idx<0) notify('found — not shown on plot (sampled out of view)');
@@ -480,6 +490,7 @@ function clearSearch(){
   searchbox.value=''; searchres.className=''; searchres.innerHTML=''; searchMatches=[];
   cardPinned=false; card.style.display='none';
   if(searchHL){ searchHL=null; if(last) renderPlot(last); }
+  updateSearchClear();
 }
 addEventListener('click',e=>{ if(!searchwrap.contains(e.target)) searchres.className=''; });
 
