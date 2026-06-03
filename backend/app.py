@@ -13,7 +13,10 @@ Also serves the rebuilt frontend at /.
 from __future__ import annotations
 
 import base64
+import hmac
 import io
+import os
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -74,12 +77,20 @@ class ImageRequest(BaseModel):
     height: int = 360
 
 
+class DefaultSaveRequest(BaseModel):
+    session_id: str
+    set_name: str          # a set already uploaded in this session
+    token: str             # must match CBCSPACE_ADMIN_TOKEN
+    name: str | None = None  # library name to publish as (defaults to set_name)
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 @app.get("/session/new")
 def session_new():
     sid = store.new_session()
     sets = {name: {"n_molecules": n} for name, n in store.list_defaults().items()}
-    return {"session_id": sid, "descriptor_labels": DESCRIPTOR_LABELS, "sets": sets}
+    return {"session_id": sid, "descriptor_labels": DESCRIPTOR_LABELS, "sets": sets,
+            "default_save_enabled": bool(os.environ.get("CBCSPACE_ADMIN_TOKEN"))}
 
 
 @app.post("/upload")
@@ -151,6 +162,30 @@ def molecule_image(req: ImageRequest):
     png = d.GetDrawingText()
     b64 = base64.b64encode(png).decode()
     return {"image": f"data:image/png;base64,{b64}"}
+
+
+@app.post("/default/save")
+def default_save(req: DefaultSaveRequest):
+    """Publish a session set as a shared default library (token-gated).
+
+    The session parquet already carries descriptors + fingerprints in the same
+    schema as defaults, so promotion is a straight file copy.
+    """
+    admin_token = os.environ.get("CBCSPACE_ADMIN_TOKEN")
+    if not admin_token:
+        raise HTTPException(404, "feature disabled")
+    if not hmac.compare_digest(req.token, admin_token):
+        raise HTTPException(403, "invalid admin token")
+
+    src = store.resolve_set(req.session_id, req.set_name)
+    if src is None:
+        raise HTTPException(404, "dataset not found")
+    name = store.safe_set_name(req.name or req.set_name)
+    if not name:
+        raise HTTPException(400, "invalid library name")
+
+    shutil.copyfile(src, store.DEFAULTS_DIR / f"{name}.parquet")
+    return {"ok": True, "name": name, "n_molecules": store.list_defaults().get(name, 0)}
 
 
 @app.delete("/session/{sid}/set/{name}")

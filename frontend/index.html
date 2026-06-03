@@ -55,6 +55,7 @@
     .ct{font-size:.68rem;color:var(--ink3);flex-shrink:0;font-variant-numeric:tabular-nums}
     .rm{background:none;border:none;color:var(--ink3);cursor:pointer;font-size:.8rem;padding:0 .2rem}
     .rm:hover{color:var(--warn)}
+    .rm.df:hover{color:var(--acc)}
     .seg{display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.5rem}
     .seg .opt{font-size:.74rem;padding:.28rem .65rem;border-radius:5px;border:1px solid var(--line2);
       background:var(--soft);color:var(--ink2);cursor:pointer;transition:.15s}
@@ -207,7 +208,7 @@
 
 <script>
 const API = '';  // same origin
-let sid=null, datasets={}, defaults=new Set(), method='PCA', nDims=2, feature='descriptors', dark=false, last=null, descLabels={}, ci=0;
+let sid=null, datasets={}, defaults=new Set(), method='PCA', nDims=2, feature='descriptors', dark=false, last=null, descLabels={}, ci=0, canSaveDefault=false;
 const COLORS=['#3B5BFF','#FF6B6B','#51CF66','#FFD43B','#CC5DE8','#FF922B','#74C0FC','#F06595','#A9E34B','#13B7A6'];
 const COLOR_OPTS=[['#3B5BFF','blue'],['#FF6B6B','coral'],['#51CF66','green'],['#FFD43B','yellow'],['#CC5DE8','purple'],
   ['#FF922B','orange'],['#74C0FC','sky'],['#F06595','pink'],['#A9E34B','lime'],['#13B7A6','teal'],['#FF4444','red'],['#FFFFFF','white']];
@@ -216,7 +217,7 @@ async function init(){
   try{
     const r=await fetch(`${API}/session/new`); const d=await r.json();
     if(!r.ok) throw 0;
-    sid=d.session_id; descLabels=d.descriptor_labels;
+    sid=d.session_id; descLabels=d.descriptor_labels; canSaveDefault=!!d.default_save_enabled;
     buildDescs(); buildAxes();
     Object.entries(d.sets).forEach(([n,info])=>{
       datasets[n]={count:info.n_molecules,color:COLORS[ci++%COLORS.length],visible:true,isDefault:true}; defaults.add(n);
@@ -259,6 +260,7 @@ function rowHTML(n,d){
   return `<div class="row"><input type="checkbox" ${d.visible?'checked':''} onchange="datasets['${n}'].visible=this.checked">
     ${swatchHTML(n,d.color)}<span class="nm" title="${n}">${n}</span>
     <span class="ct">${d.count.toLocaleString()}</span>
+    ${d.isDefault||!canSaveDefault?'':`<button class="rm df" title="publish as default library" onclick="saveDefault('${n}')">★</button>`}
     ${d.isDefault?'':`<button class="rm" onclick="removeSet('${n}')">✕</button>`}</div>`;
 }
 function renderList(){
@@ -273,6 +275,25 @@ async function removeSet(n){
   if(sid) await fetch(`${API}/session/${sid}/set/${encodeURIComponent(n)}`,{method:'DELETE'});
   delete datasets[n]; renderList();
   if(!Object.keys(datasets).length){ go.disabled=true; empty.classList.remove('hide'); Plotly.purge('plot'); last=null; plotinfo.style.display='none'; resetbtn.style.display='none'; }
+}
+async function saveDefault(n){
+  const name=(prompt(`Publish "${n}" as a shared default library.\nLibrary name:`, n)||'').trim();
+  if(!name) return;
+  let token=localStorage.getItem('cbcspace_admin_token')||'';
+  if(!token){ token=(prompt('Admin token:')||'').trim(); if(!token) return; }
+  try{
+    const r=await fetch(`${API}/default/save`,{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({session_id:sid,set_name:n,name,token})});
+    const d=await r.json();
+    if(r.status===403){ localStorage.removeItem('cbcspace_admin_token'); throw new Error('invalid admin token'); }
+    if(!r.ok) throw new Error(d.detail||'could not publish');
+    localStorage.setItem('cbcspace_admin_token',token);
+    // reflect the new default locally without disturbing the user's session copy
+    if(!datasets[d.name]){ datasets[d.name]={count:d.n_molecules,color:COLORS[ci++%COLORS.length],visible:true,isDefault:true}; }
+    else { datasets[d.name].isDefault=true; }
+    defaults.add(d.name); renderList();
+    notify(`published default "${d.name}" (${d.n_molecules.toLocaleString()})`);
+  }catch(e){ notify(e.message,1); }
 }
 
 // controls
@@ -331,7 +352,7 @@ function renderPlot(data){
     const base={name:lb,mode:'markers',marker:{size:ps,color:g.c,opacity:.8,line:{width:.4,color:'rgba(0,0,0,.25)'}},
       customdata:g.s.map((s,i)=>[lb,g.n[i],s])};
     // scatter3d swallows plotly_hover when hoverinfo:'none', so use a transparent hover label instead
-    return nDims===3?{...base,type:'scatter3d',x:g.x,y:g.y,z:g.z,marker:{...base.marker,line:{width:0}},
+    return nDims===3?{...base,type:'scatter3d',x:g.x,y:g.y,z:g.z,marker:{...base.marker,size:ps*0.6,line:{width:0}},
                       hovertemplate:'<extra></extra>',hoverlabel:{bgcolor:'rgba(0,0,0,0)',bordercolor:'rgba(0,0,0,0)',font:{color:'rgba(0,0,0,0)'}}}
                     :{...base,type:'scattergl',x:g.x,y:g.y,hoverinfo:'none'};
   });
