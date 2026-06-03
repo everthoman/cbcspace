@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 
 from descriptors import DESCRIPTOR_KEYS, FP_BYTES, compute_descriptors, compute_fingerprints
+from standardize import standardize_smiles
 
 BASE = Path(__file__).resolve().parent
 SESSIONS_DIR = BASE / "sessions"
@@ -88,7 +89,11 @@ def read_table(path: Path) -> pd.DataFrame:
 def ingest_dataframe(df: pd.DataFrame, set_name: str, dest: Path) -> int:
     """Compute descriptors for `df` and write a parquet dataset. Returns rows kept."""
     smi_col, name_col = _detect_columns(df)
-    smiles = df[smi_col].astype(str).fillna("").tolist()
+    raw_smiles = df[smi_col].astype(str).fillna("").tolist()
+    # Full standardization (salt/solvent strip + neutralize) before descriptors
+    # and fingerprints, so counterions don't distort chemical space. The parent
+    # SMILES becomes the canonical structure used everywhere (plot, popup, search).
+    smiles = standardize_smiles(raw_smiles)
     if name_col is not None:
         names = df[name_col].astype(str).fillna("").tolist()
     else:
