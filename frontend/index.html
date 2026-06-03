@@ -111,6 +111,21 @@
     .sres .nm{font-size:.76rem;color:var(--ink);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .sres .ds{font-size:.64rem;color:var(--ink3)}
     .snon{font-size:.72rem;color:var(--ink3);padding:.45rem .55rem}
+    #ometric{margin-bottom:.5rem}
+    #othreshrow{display:flex;align-items:center;gap:.4rem;font-size:.7rem;color:var(--ink2);margin-bottom:.5rem}
+    #othreshrow input{flex:1}
+    #ocaption{font-size:.66rem;color:var(--ink3);line-height:1.3;margin-bottom:.4rem}
+    #omatrix{overflow:auto}
+    table.omx{border-collapse:collapse;font-size:.62rem;margin:0 auto}
+    table.omx th{color:var(--ink3);font-weight:700;padding:2px 3px;text-align:center}
+    table.omx th.rh{text-align:right;max-width:74px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    table.omx td{width:26px;height:24px;text-align:center;color:var(--ink);border:1px solid var(--bg);
+      font-variant-numeric:tabular-nums;cursor:default}
+    table.omx td.diag{color:var(--ink3);background:var(--soft) !important}
+    #olegend{margin-top:.6rem;font-size:.66rem;color:var(--ink2);line-height:1.5}
+    #olegend .li{display:flex;align-items:center;gap:.35rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    #olegend .sw{width:9px;height:9px;border-radius:2px;flex-shrink:0}
+    #olegend .mut{color:var(--ink3)}
     #empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
       flex-direction:column;gap:.4rem;pointer-events:none;color:var(--ink3)}
     #empty.hide{display:none}
@@ -225,9 +240,19 @@
   <div class="panel" id="right"><div class="scroll">
     <div class="lbl">overlap analysis</div>
     <button class="btn" style="width:100%;margin-bottom:.5rem" onclick="computeOverlap()">compute overlap</button>
-    <table><thead><tr><th>sets</th><th style="text-align:right">distance</th></tr></thead><tbody id="distbody"></tbody></table>
-    <div class="lbl" style="margin-top:1.1rem">spread</div>
-    <table><thead><tr><th>set</th><th style="text-align:right">spread</th></tr></thead><tbody id="spreadbody"></tbody></table>
+    <div class="seg" id="ometric">
+      <div class="opt on" onclick="setOMetric('separation')" title="centroid distance / pooled spread">separation</div>
+      <div class="opt" onclick="setOMetric('coverage')" title="% of row set with a Tanimoto neighbour in column set">structural</div>
+      <div class="opt" onclick="setOMetric('plot')" title="overlap of the displayed point densities">plot</div>
+    </div>
+    <div id="othreshrow" style="display:none">
+      <span>Tanimoto ≥ <b id="othreshval">0.70</b></span>
+      <input type="range" id="othresh" min="0.3" max="1" step="0.05" value="0.7"
+        oninput="othreshval.textContent=parseFloat(this.value).toFixed(2)" onchange="computeOverlap()">
+    </div>
+    <div id="ocaption"></div>
+    <div id="omatrix"></div>
+    <div id="olegend"></div>
   </div></div>
 </div>
 <div id="notif"></div>
@@ -495,16 +520,81 @@ function clearSearch(){
 addEventListener('click',e=>{ if(!searchwrap.contains(e.target)) searchres.className=''; });
 
 // overlap
+let overlapData=null, oMetric='separation';
+function setOMetric(m){
+  oMetric=m;
+  document.querySelectorAll('#ometric .opt').forEach(o=>o.classList.toggle('on',o.getAttribute('onclick').includes(`'${m}'`)));
+  othreshrow.style.display = m==='coverage' ? 'flex' : 'none';
+  renderMatrix();
+}
 async function computeOverlap(){
   const vis=Object.entries(datasets).filter(([,d])=>d.visible).map(([n])=>n);
   if(vis.length<2){ notify('need at least 2 datasets',1); return; }
   try{
     const r=await fetch(`${API}/overlap`,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({session_id:sid,set_names:vis,descriptor_cols:selDescs(),method,n_dimensions:nDims,feature})});
+      body:JSON.stringify({session_id:sid,set_names:vis,descriptor_cols:selDescs(),method,n_dimensions:nDims,
+        feature,tanimoto_threshold:parseFloat(othresh.value)})});
     const d=await r.json(); if(!r.ok) throw new Error(d.detail);
-    distbody.innerHTML=Object.entries(d.centroid_distances).map(([k,v])=>`<tr><td>${k}</td><td class="v">${v.toFixed(2)}</td></tr>`).join('')||'<tr><td colspan=2>—</td></tr>';
-    spreadbody.innerHTML=Object.entries(d.spread).map(([k,v])=>`<tr><td>${k}</td><td class="v">${v.toFixed(2)}</td></tr>`).join('');
+    d.plot=plotOverlapMatrix(d.sets.map(s=>s.name));  // client-side, from displayed coords
+    overlapData=d;
+    renderMatrix();
   }catch(e){ notify(e.message,1); }
+}
+// histogram-overlap coefficient of the displayed point clouds (2D/3D)
+function plotOverlapMatrix(names){
+  if(!last) return null;
+  const present=names.filter(n=>last.labels.includes(n));
+  if(present.length<2) return null;
+  const D=nDims, BINS=28;
+  const pts={}; present.forEach(n=>pts[n]=[]);
+  last.labels.forEach((lb,i)=>{ if(pts[lb]) pts[lb].push(last.coords[i]); });
+  // shared bounding box across the present sets
+  const lo=Array(D).fill(Infinity), hi=Array(D).fill(-Infinity);
+  present.forEach(n=>pts[n].forEach(c=>{ for(let k=0;k<D;k++){ if(c[k]<lo[k])lo[k]=c[k]; if(c[k]>hi[k])hi[k]=c[k]; }}));
+  const span=lo.map((v,k)=>(hi[k]-lo[k])||1);
+  const hist=n=>{ const h=new Map(), P=pts[n]; for(const c of P){ let key=0; for(let k=0;k<D;k++){ let b=Math.floor((c[k]-lo[k])/span[k]*BINS); if(b>=BINS)b=BINS-1; key=key*BINS+b; } h.set(key,(h.get(key)||0)+1); } for(const k of h.keys()) h.set(k,h.get(k)/P.length); return h; };
+  const H={}; present.forEach(n=>H[n]=hist(n));
+  const out={}; present.forEach(a=>{ out[a]={}; });
+  for(const a of present){ out[a][a]=1; for(const b of present){ if(a===b) continue;
+    let s=0; const ha=H[a], hb=H[b]; for(const [k,va] of ha){ const vb=hb.get(k); if(vb) s+=Math.min(va,vb); } out[a][b]=s; } }
+  return out;
+}
+const METRICS={
+  separation:{title:'separation = centroid distance ÷ pooled spread. Lower ⇒ more overlap (≈0 coincident, &gt;2 well separated). Symmetric.',
+    fmt:v=>v.toFixed(2), intensity:v=>1-Math.min(v,3)/3, has:d=>d.separation, sym:true},
+  coverage:{title:'structural overlap: % of the ROW set with a Tanimoto-neighbour in the COLUMN set. Directional.',
+    fmt:v=>v.toFixed(0)+'%', intensity:v=>v/100, has:d=>d.coverage, sym:false},
+  plot:{title:'overlap of the displayed point densities (0–1). Higher ⇒ clouds intersect more. Symmetric.',
+    fmt:v=>v.toFixed(2), intensity:v=>v, has:d=>d.plot, sym:true},
+};
+function cellColor(t){ // t in 0..1 → accent with alpha, readable text
+  const a=Math.max(0,Math.min(1,t));
+  return {bg:`rgba(59,91,255,${(0.08+0.82*a).toFixed(3)})`, fg:a>0.5?'#fff':'var(--ink)'};
+}
+function renderMatrix(){
+  if(!overlapData){ omatrix.innerHTML=''; olegend.innerHTML=''; ocaption.innerHTML=''; return; }
+  const M=METRICS[oMetric], mat=M.has(overlapData);
+  ocaption.innerHTML=M.title + (oMetric==='coverage'?` (Tanimoto ≥ ${parseFloat(othresh.value).toFixed(2)})`:'');
+  const names=overlapData.sets.map(s=>s.name);
+  if(!mat){ omatrix.innerHTML='<div class="snon">'+(oMetric==='plot'?'compute a projection of these sets first':'not available')+'</div>'; olegend.innerHTML=''; return; }
+  const idx=names.map((_,i)=>i+1);
+  let html='<table class="omx"><tr><th></th>'+names.map((n,i)=>`<th title="${esc(n)}">${i+1}</th>`).join('')+'</tr>';
+  names.forEach((a,i)=>{
+    html+=`<tr><th class="rh" title="${esc(a)}">${i+1} ${esc(a)}</th>`;
+    names.forEach((b,j)=>{
+      const row=mat[a]||{}, v=row[b];
+      if(v==null){ html+='<td class="diag">·</td>'; return; }
+      if(i===j){ html+=`<td class="diag" title="${esc(a)}">${M.fmt(v)}</td>`; return; }
+      const c=cellColor(M.intensity(v));
+      html+=`<td style="background:${c.bg};color:${c.fg}" title="${esc(a)} ${M.sym?'↔':'→'} ${esc(b)}: ${M.fmt(v)}">${M.fmt(v)}</td>`;
+    });
+    html+='</tr>';
+  });
+  html+='</table>';
+  omatrix.innerHTML=html;
+  olegend.innerHTML=overlapData.sets.map((s,i)=>
+    `<div class="li" title="${esc(s.name)}"><span class="sw" style="background:${datasets[s.name]?.color||'#888'}"></span>`
+    +`<b>${i+1}</b> ${esc(s.name)} <span class="mut">· n=${s.n.toLocaleString()} · spread ${s.spread}</span></div>`).join('');
 }
 
 // helpers

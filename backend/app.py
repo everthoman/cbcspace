@@ -69,6 +69,7 @@ class OverlapRequest(BaseModel):
     method: str = "PCA"
     n_dimensions: int = 2
     feature: str = "descriptors"
+    tanimoto_threshold: float = 0.7
 
 
 class ImageRequest(BaseModel):
@@ -148,7 +149,8 @@ def overlap(req: OverlapRequest):
     if len(req.set_names) < 2:
         raise HTTPException(400, "need at least 2 datasets")
     try:
-        return engine.overlap(req.session_id, req.set_names, req.descriptor_cols, req.feature)
+        return engine.overlap(req.session_id, req.set_names, req.descriptor_cols, req.feature,
+                              req.tanimoto_threshold)
     except (KeyError, ValueError) as e:
         raise HTTPException(400, str(e))
 
